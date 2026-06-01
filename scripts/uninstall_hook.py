@@ -23,7 +23,7 @@ def main() -> int:
     target_file = target_dir / "hooks.json"
 
     if not target_file.exists():
-        print(f"No Codex hooks found at {target_file}. Already uninstalled.")
+        print(f"No Codex hooks found at {str(target_file)!r}. Already uninstalled.")
         return 0
 
     try:
@@ -38,7 +38,9 @@ def main() -> int:
         if not isinstance(hooks, dict):
             # If the file format is invalid/corrupted, delete the file
             target_file.unlink()
-            print(f"Successfully uninstalled Codex hooks by removing invalid {target_file}!")
+            print(
+                f"Successfully uninstalled Codex hooks by removing invalid {str(target_file)!r}!"
+            )
             return 0
 
         modified = False
@@ -65,7 +67,10 @@ def main() -> int:
                     is_visualizer = False
                     if isinstance(hook_item, dict):
                         command = hook_item.get("command", "")
-                        if isinstance(command, str) and "agentic-workflow-visualizer" in command:
+                        if (
+                            isinstance(command, str)
+                            and "agentic-workflow-visualizer" in command
+                        ):
                             is_visualizer = True
                             modified = True
 
@@ -88,19 +93,23 @@ def main() -> int:
             del hooks[key]
 
         if not modified:
-            print(f"No visualizer-specific hooks were found in {target_file}. Preserved other user hooks.")
+            print(
+                f"No visualizer-specific hooks were found in {target_file}. Preserved other user hooks."
+            )
             return 0
 
         # If no hooks are left, remove the file entirely
         if not hooks:
             target_file.unlink()
-            print(f"Successfully uninstalled all visualizer hooks and removed {target_file}!")
+            print(
+                f"Successfully uninstalled all visualizer hooks and removed {str(target_file)!r}!"
+            )
 
             # Clean up the directory if it is now empty
             if target_dir.exists() and not any(target_dir.iterdir()):
                 try:
                     target_dir.rmdir()
-                    print(f"Removed empty directory {target_dir}")
+                    print(f"Removed empty directory {str(target_dir)!r}.")
                 except Exception:
                     pass
         else:
@@ -108,13 +117,15 @@ def main() -> int:
             hooks_config["hooks"] = hooks
             with open(target_file, "w", encoding="utf-8") as f:
                 json.dump(hooks_config, f, indent=4)
-            print(f"Successfully removed visualizer-specific hooks from {target_file} while preserving your other user hooks.")
+            print(
+                f"Successfully removed visualizer-specific hooks from {str(target_file)!r} while preserving your other user hooks."
+            )
 
         return 0
 
     except PermissionError:
         print(
-            f"Permission denied when updating {target_file}. Please run this script with appropriate privileges:"
+            f"Permission denied when updating {str(target_file)!r}. Please run this script with appropriate privileges:"
         )
         if os.name == "nt":
             print("Please run as Administrator.")

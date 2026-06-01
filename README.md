@@ -60,9 +60,8 @@ uv run install       # Install the Codex hooks
 uv run uninstall     # Uninstall the Codex hooks
 ```
 
-> [!NOTE]
+> [!WARNING]
 > The `start` command starts the FastAPI server in the background (logging output to a temporary log file) and opens the web browser dashboard. If you prefer to run the server in the foreground, use `uv run server` or `uv run start --serve`.
-
 
 ### Installing Global Codex Hooks (Root / User)
 
@@ -100,8 +99,6 @@ sudo uv run uninstall
 
 > [!NOTE]
 > The uninstallation command only removes visualizer-specific hooks from `hooks.json` and preserves all other user-defined hooks. If no other hooks remain after filtering, the `hooks.json` file is deleted completely.
-
-
 
 ## Run The Demo
 

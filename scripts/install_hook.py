@@ -74,7 +74,7 @@ def main() -> int:
         with open(target_file, "w", encoding="utf-8") as f:
             json.dump(hooks_config, f, indent=4)
 
-        print(f"Successfully installed Codex hooks to {target_file!r}!")
+        print(f"Successfully installed Codex hooks to {str(target_file)!r}!")
         return 0
 
     except Exception as e:
