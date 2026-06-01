@@ -4,6 +4,12 @@ Real-time browser dashboard for Codex activity: user prompts, tool calls, tool o
 
 The current ready-to-run path is project-local Codex hooks in `.codex/hooks.json`. A Codex plugin scaffold is also included under `plugins/agentic-workflow-visualizer`.
 
+Each workflow is also persisted as a replayable JSONL log under `.awv-logs/`, so you can drag that file back onto the dashboard later and reconstruct the graph without rerunning Codex.
+
+The UI also works as a standalone static page for replay-only visualization. If you host the contents of `ui/` on any static file server, the page can ingest a saved JSONL log via drag-and-drop and render the workflow fully in-browser without FastAPI.
+
+Codex hooks do not auto-start the FastAPI server. If the dashboard/server is already running, hooks stream events live. If it is not running, hooks append replayable entries to an offline JSONL capture instead.
+
 ## What It Runs
 
 ```text
@@ -196,11 +202,21 @@ To use them:
 3. Review and trust the hooks from `.codex/hooks.json`.
 4. Run your normal Codex prompt.
 
-Once trusted, the first hook event starts the dashboard if needed, opens the browser when possible, and posts hook payloads to:
+Once trusted, hook behavior is:
+
+- if the FastAPI server is already running, the hook posts live updates to:
 
 ```text
 POST /codex-hook/{HookName}
 ```
+
+- if the FastAPI server is **NOT** running, the hook **DOES NOT** start it and instead appends replayable JSONL entries to:
+
+```text
+.awv-logs/offline-capture.jsonl
+```
+
+That offline capture can be dragged into the static UI or the live dashboard later.
 
 The hook script intentionally returns no model-visible content. It observes actions and results without exposing or visualizing internal reasoning text.
 
@@ -219,7 +235,52 @@ Expected result:
 - Arrows show branching, not a simple line
 - Statuses and elapsed times update live
 - Tool calls and outputs appear in the event feed
+- Spawned agents retain the original spawn prompt captured from `PostToolUse`
 - Demo mode costs $0.00; live Codex cost depends on the selected model
+
+## Replay A Saved Workflow
+
+Every live workflow is written to a timestamped `.jsonl` file in:
+
+```text
+.awv-logs/
+```
+
+The file stores both the raw Codex hook payload and the normalized workflow event used by the UI.
+
+If hooks fire while the server is not running, they are buffered into:
+
+```text
+.awv-logs/offline-capture.jsonl
+```
+
+Those buffered entries use the same replay-friendly event envelope and can be dropped into the UI directly.
+
+To replay it:
+
+1. Open the dashboard.
+2. Drag the `.jsonl` log onto the `Replay Log` panel in the right sidebar.
+3. The graph reloads from the file immediately, without requiring a fresh Codex run.
+
+You can also download the current live log directly from the `Download Log` button in the header.
+
+## Static Hosting
+
+For replay-only usage, you can host the UI as plain static files:
+
+```text
+ui/index.html
+ui/style.css
+ui/graph.js
+```
+
+In this mode:
+
+- drag-and-drop replay works fully in the browser
+- no FastAPI server is required
+- live hook streaming, demo playback, and live-log download are unavailable
+
+The same `index.html` also continues to work under the FastAPI app, where it automatically falls back to `/static/...` asset URLs and enables live mode.
 
 ## Plugin Scaffold
 
@@ -254,6 +315,7 @@ AWV_PORT       Port for the local server. Default: 8765
 AWV_URL        Full dashboard URL. Default: http://127.0.0.1:$AWV_PORT
 AWV_REPO_ROOT  Explicit repo root for hook execution
 AWV_LOG        Server log path. Default: /tmp/agentic-workflow-visualizer.log
+AWV_BUFFER_LOG Offline hook capture path. Default: <repo>/.awv-logs/offline-capture.jsonl
 ```
 
 Example:
@@ -269,8 +331,10 @@ GET  /                 Serve the browser UI
 GET  /health           Health check
 GET  /state            Current graph state
 GET  /stream           SSE stream for live browser updates
+GET  /log/current      Download the current JSONL workflow log
 POST /event            Generic workflow event ingest
 POST /codex-hook/{x}   Raw Codex hook ingest
+POST /replay-log       Replay a saved JSONL workflow log
 POST /demo             Replay the local branching demo
 POST /reset            Clear in-memory graph state
 ```
@@ -301,7 +365,13 @@ If hooks do not fire:
 
 - Confirm Codex was started inside this git repo.
 - Run `/hooks` and verify `.codex/hooks.json` is trusted.
-- Check the hook/server log:
+- If the server was not running, inspect the buffered capture:
+
+```bash
+tail -100 .awv-logs/offline-capture.jsonl
+```
+
+- If the server was running, check the server log:
 
 ```bash
 tail -100 /tmp/agentic-workflow-visualizer.log

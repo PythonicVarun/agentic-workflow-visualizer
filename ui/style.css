@@ -58,9 +58,44 @@ button {
     padding: 0 14px;
 }
 
+button:disabled {
+    background: #f4f6f8;
+    border-color: #d7dde5;
+    color: #94a0ae;
+    cursor: not-allowed;
+}
+
+.button-link {
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: inline-flex;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 650;
+    height: 38px;
+    padding: 0 14px;
+    text-decoration: none;
+}
+
+.button-link.is-disabled {
+    background: #f4f6f8;
+    border-color: #d7dde5;
+    color: #94a0ae;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 button:hover {
     border-color: #a7b0bc;
     background: #f9fafb;
+}
+
+.button-link:hover {
+    background: #f9fafb;
+    border-color: #a7b0bc;
 }
 
 .app-shell {
@@ -160,10 +195,23 @@ h2 {
     background: var(--failed);
 }
 
+.log-status {
+    align-items: center;
+    background: #ecfeff;
+    border: 1px solid #b9edf0;
+    border-radius: 999px;
+    color: #0f766e;
+    display: inline-flex;
+    font-size: 0.8rem;
+    font-weight: 800;
+    height: 34px;
+    padding: 0 12px;
+    white-space: nowrap;
+}
+
 .workspace {
     display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr) minmax(290px, 350px);
+    grid-template-columns: 1fr 14px 350px;
     min-height: 0;
     padding: 14px;
 }
@@ -232,8 +280,6 @@ h2 {
     min-height: 0;
     width: 100%;
 }
-
-/* ── Zoom Controls ── */
 
 .zoom-controls {
     align-items: center;
@@ -317,8 +363,7 @@ h2 {
 
 .inspector {
     display: grid;
-    gap: 14px;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto 14px auto 14px 1fr;
 }
 
 .panel {
@@ -333,6 +378,8 @@ h2 {
     display: grid;
     gap: 14px;
     padding: 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 dl {
@@ -374,6 +421,77 @@ dd {
     font-size: 0.92rem;
     line-height: 1.45;
     padding-left: 10px;
+}
+
+.prompt-card {
+    background: var(--surface-strong);
+    border: 1px solid #e1e6ee;
+    border-radius: 8px;
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+}
+
+.prompt-label {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.selected-prompt {
+    color: #273241;
+    font-size: 0.84rem;
+    line-height: 1.45;
+    max-height: 132px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.replay-panel {
+    display: grid;
+    gap: 12px;
+    padding: 0 0 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.log-path {
+    color: var(--muted);
+    font-size: 0.76rem;
+    line-height: 1.4;
+    padding: 0 16px;
+    word-break: break-all;
+}
+
+.replay-dropzone {
+    align-items: center;
+    background: linear-gradient(180deg, #fbfdff 0%, #f1f6fb 100%);
+    border: 1.5px dashed #9cb4ca;
+    border-radius: 8px;
+    color: #36506a;
+    cursor: pointer;
+    display: flex;
+    font-size: 0.84rem;
+    font-weight: 700;
+    justify-content: center;
+    line-height: 1.4;
+    margin: 0 16px;
+    min-height: 82px;
+    padding: 14px;
+    text-align: center;
+    transition:
+        border-color 0.15s ease,
+        background 0.15s ease,
+        color 0.15s ease;
+}
+
+.replay-dropzone:hover,
+.replay-dropzone.dragover {
+    background: linear-gradient(180deg, #effcf8 0%, #e0f6ee 100%);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .feed-panel {
@@ -578,11 +696,126 @@ dd {
     }
 
     .workspace {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr !important;
         grid-template-rows: minmax(0, 1fr);
     }
 
     .inspector {
         display: none;
     }
+
+    .resize-handle-v {
+        display: none;
+    }
+}
+
+/* Resize Handles Styling */
+.resize-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    z-index: 10;
+    transition: background-color 0.2s ease;
+}
+
+.resize-handle:hover {
+    background-color: rgba(15, 118, 110, 0.04);
+}
+
+.resize-handle.active {
+    background-color: rgba(15, 118, 110, 0.08);
+}
+
+.resize-handle-line {
+    background-color: var(--line);
+    border-radius: 999px;
+    transition:
+        background-color 0.2s ease,
+        transform 0.2s ease,
+        width 0.2s ease,
+        height 0.2s ease;
+}
+
+.resize-handle:hover .resize-handle-line,
+.resize-handle.active .resize-handle-line {
+    background-color: var(--accent);
+}
+
+/* Vertical Splitter (Resizes columns horizontally) */
+.resize-handle-v {
+    cursor: col-resize;
+    width: 14px;
+    height: 100%;
+}
+
+.resize-handle-v .resize-handle-line {
+    width: 4px;
+    height: 40px;
+}
+
+.resize-handle-v:hover .resize-handle-line,
+.resize-handle-v.active .resize-handle-line {
+    width: 6px;
+    height: 60px;
+    transform: scaleX(1.2);
+}
+
+/* Horizontal Splitter (Resizes panels vertically) */
+.resize-handle-h {
+    cursor: row-resize;
+    height: 14px;
+    width: 100%;
+}
+
+.resize-handle-h .resize-handle-line {
+    width: 40px;
+    height: 4px;
+}
+
+.resize-handle-h:hover .resize-handle-line,
+.resize-handle.active .resize-handle-line {
+    width: 60px;
+    height: 6px;
+    transform: scaleY(1.2);
+}
+
+/* Body cursors during drag */
+body.resizing-col,
+body.resizing-col * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+body.resizing-row,
+body.resizing-row * {
+    cursor: row-resize !important;
+    user-select: none !important;
+}
+
+/* Custom scrollbar styling for panels and event feed */
+.node-panel::-webkit-scrollbar,
+.replay-panel::-webkit-scrollbar,
+.event-feed::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.node-panel::-webkit-scrollbar-track,
+.replay-panel::-webkit-scrollbar-track,
+.event-feed::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.node-panel::-webkit-scrollbar-thumb,
+.replay-panel::-webkit-scrollbar-thumb,
+.event-feed::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-radius: 999px;
+}
+
+.node-panel::-webkit-scrollbar-thumb:hover,
+.replay-panel::-webkit-scrollbar-thumb:hover,
+.event-feed::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.3);
 }

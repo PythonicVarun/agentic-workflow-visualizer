@@ -12,3 +12,4 @@ wheels/
 # Local verification output
 .playwright-mcp/
 agentic-visualizer-*.png
+.awv-logs/

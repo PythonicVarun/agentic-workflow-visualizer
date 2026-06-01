@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import getpass
 import json
 import os
-import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
-import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 DEFAULT_PORT = int(os.environ.get("AWV_PORT", "8765"))
 BASE_URL = os.environ.get("AWV_URL", f"http://127.0.0.1:{DEFAULT_PORT}")
-username = getpass.getuser()
-LOG_PATH = Path(
-    os.environ.get("AWV_LOG", f"/tmp/agentic-workflow-visualizer-{username}.log")
-)
-BROWSER_MARKER = Path(
-    f"/tmp/agentic-workflow-visualizer-browser-{username}-{DEFAULT_PORT}.marker"
-)
 
 
 def read_payload() -> dict[str, Any]:
@@ -62,53 +52,6 @@ def server_up() -> bool:
         return False
 
 
-def wait_for_server(seconds: float = 4.0) -> bool:
-    deadline = time.time() + seconds
-    while time.time() < deadline:
-        if server_up():
-            return True
-        time.sleep(0.15)
-    return False
-
-
-def open_browser_once() -> None:
-    if BROWSER_MARKER.exists():
-        return
-    try:
-        BROWSER_MARKER.write_text(str(time.time()), encoding="utf-8")
-        webbrowser.open_new_tab(BASE_URL)
-    except OSError:
-        pass
-
-
-def ensure_server(repo: Path) -> None:
-    if server_up():
-        open_browser_once()
-        return
-
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    log = LOG_PATH.open("ab")
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "server.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(DEFAULT_PORT),
-        ],
-        cwd=repo,
-        stdin=subprocess.DEVNULL,
-        stdout=log,
-        stderr=log,
-        start_new_session=True,
-    )
-    if wait_for_server():
-        open_browser_once()
-
-
 def post_hook(hook_name: str, payload: dict[str, Any]) -> None:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -121,6 +64,43 @@ def post_hook(hook_name: str, payload: dict[str, Any]) -> None:
         pass
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def buffered_log_path(repo: Path) -> Path:
+    override = os.environ.get("AWV_BUFFER_LOG")
+    if override:
+        return Path(override).expanduser().resolve()
+    return repo / ".awv-logs" / "offline-capture.jsonl"
+
+
+def ensure_repo_importable(repo: Path) -> None:
+    repo_str = str(repo)
+    if repo_str not in sys.path:
+        sys.path.insert(0, repo_str)
+
+
+def append_buffered_hook(repo: Path, hook_name: str, payload: dict[str, Any]) -> None:
+    ensure_repo_importable(repo)
+    from server.codex_adapter import codex_hook_to_event
+
+    event = codex_hook_to_event(hook_name, payload)
+    path = buffered_log_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "kind": "hook_event",
+        "hook_name": hook_name,
+        "recorded_at": utc_now(),
+        "buffered": True,
+        "payload": payload,
+        "event": event.model_dump(mode="json"),
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=True, default=str))
+        handle.write("\n")
+
+
 def main() -> int:
     hook_name = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = read_payload()
@@ -128,8 +108,10 @@ def main() -> int:
     repo = find_repo_root(payload)
 
     try:
-        ensure_server(repo)
-        post_hook(hook_name, payload)
+        if server_up():
+            post_hook(hook_name, payload)
+        else:
+            append_buffered_hook(repo, hook_name, payload)
     except Exception:
         # Visualization should never interfere with the coding agent.
         return 0

@@ -60,6 +60,9 @@ class WorkflowNode:
     updated_at: datetime = field(default_factory=utc_now)
     completed_at: datetime | None = None
     model: str | None = None
+    parent_id: str | None = None
+    nickname: str | None = None
+    spawn_prompt: str | None = None
     event_count: int = 0
     tool_count: int = 0
 
@@ -79,6 +82,9 @@ class WorkflowNode:
                 self.completed_at.isoformat() if self.completed_at else None
             ),
             "model": self.model,
+            "parent_id": self.parent_id,
+            "nickname": self.nickname,
+            "spawn_prompt": self.spawn_prompt,
             "event_count": self.event_count,
             "tool_count": self.tool_count,
         }
@@ -173,6 +179,20 @@ class GraphState:
         node.updated_at = now
         return node
 
+    def _link_parent(
+        self, parent_id: str, child_id: str, label: str = "spawned"
+    ) -> None:
+        for key, edge in list(self._edges.items()):
+            if (
+                edge.target == child_id
+                and edge.label == label
+                and edge.source != parent_id
+            ):
+                self._edges.pop(key, None)
+        self._edges[(parent_id, child_id, label)] = WorkflowEdge(
+            parent_id, child_id, label
+        )
+
     def _touch(
         self,
         event: WorkflowEvent,
@@ -194,6 +214,8 @@ class GraphState:
         node.last_action = _trim(action)
         node.updated_at = event.timestamp
         node.event_count += 1
+        if event.parent_id:
+            node.parent_id = event.parent_id
         return node
 
     def _add_edge(self, source: str, target: str, label: str = "spawned") -> None:
@@ -246,8 +268,43 @@ class GraphState:
         )
         self._touch(event, action=f"{tool_name} result: {summarize(output, 100)}")
 
+        spawned_agent_id = event.data.get("spawned_agent_id")
+        if not spawned_agent_id:
+            return
+
+        parent_id = event.agent_id or ROOT_AGENT_ID
+        parent_label = "Primary Agent" if parent_id == ROOT_AGENT_ID else None
+        parent_role = "primary" if parent_id == ROOT_AGENT_ID else None
+        self._ensure_node(
+            parent_id,
+            label=parent_label,
+            role=parent_role,
+            status="running",
+            timestamp=event.timestamp,
+        )
+
+        child = self._ensure_node(
+            spawned_agent_id,
+            label=event.data.get("spawned_agent_label") or None,
+            role="subagent",
+            status="pending",
+            timestamp=event.timestamp,
+        )
+        child.parent_id = parent_id
+        child.nickname = event.data.get("spawned_agent_label") or child.nickname
+        child.spawn_prompt = event.data.get("spawn_prompt") or child.spawn_prompt
+        if child.last_action == "Waiting":
+            child.last_action = "Spawn requested"
+        child.updated_at = event.timestamp
+        self._link_parent(parent_id, spawned_agent_id)
+
     def _handle_subagent_spawn(self, event: WorkflowEvent) -> None:
-        parent_id = event.parent_id or ROOT_AGENT_ID
+        existing = self._nodes.get(event.agent_id)
+        parent_id = (
+            event.parent_id
+            or (existing.parent_id if existing else None)
+            or ROOT_AGENT_ID
+        )
         parent_label = "Primary Agent" if parent_id == ROOT_AGENT_ID else None
         parent_role = "primary" if parent_id == ROOT_AGENT_ID else None
         self._ensure_node(
@@ -267,8 +324,12 @@ class GraphState:
             role=event.data.get("agent_type") or event.data.get("role") or "subagent",
             label=label,
         )
+        node.parent_id = parent_id
+        node.nickname = event.data.get("name") or node.nickname
+        if event.data.get("prompt"):
+            node.spawn_prompt = event.data.get("prompt")
         node.started_at = min(node.started_at, event.timestamp)
-        self._add_edge(
+        self._link_parent(
             parent_id, event.agent_id, event.data.get("edge_label") or "spawned"
         )
 
