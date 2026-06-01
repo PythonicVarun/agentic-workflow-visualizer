@@ -420,24 +420,6 @@ function buildLayout(nodes, edges) {
     return { layout, width, height };
 }
 
-function drawDefs() {
-    const defs = createSvg("defs");
-    const marker = createSvg(
-        "marker",
-        {
-            id: "arrow",
-            viewBox: "0 0 10 10",
-            refX: 9,
-            refY: 5,
-            markerWidth: 7,
-            markerHeight: 7,
-            orient: "auto-start-reverse",
-        },
-        defs,
-    );
-    createSvg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#8a98aa" }, marker);
-}
-
 function drawEdge(edge, layout) {
     const from = layout.get(edge.from);
     const to = layout.get(edge.to);
@@ -452,7 +434,6 @@ function drawEdge(edge, layout) {
     createSvg("path", {
         class: "edge-path",
         d: path,
-        "marker-end": "url(#arrow)",
     });
 
     if (edge.label) {
@@ -560,7 +541,6 @@ function renderGraph() {
     const nodes = state.graph.nodes || [];
     const edges = state.graph.edges || [];
     els.svg.replaceChildren();
-    drawDefs();
 
     els.empty.classList.toggle("hidden", nodes.length > 0);
     if (!nodes.length) {
