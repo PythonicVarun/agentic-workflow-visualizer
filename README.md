@@ -30,36 +30,59 @@ Check Python:
 python --version
 ```
 
-## Fresh Setup
+## Fresh Setup & Direct Execution (uv / uvx)
 
-Run these commands from the repo root:
+You can run this project directly without cloning, or install/run it locally using `uv`.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+### Direct Execution with `uvx`
 
-Optional editable install, useful if you want the console scripts:
+To start the server and run the branching demo without downloading the repository:
 
 ```bash
-python -m pip install -e .
+uvx --from git+https://github.com/PythonicVarun/agentic-workflow-visualizer.git start --demo
 ```
 
-After editable install, these commands are available:
+### Local Setup with `uv`
+
+If you have cloned the repository, you can install and run it using `uv`:
 
 ```bash
-agentic-visualizer --demo
-agentic-visualizer-server
+uv pip install -e .
+uv run start --demo
 ```
+
+After installing, the following commands are available:
+
+```bash
+uv run start --demo  # Launch the visualizer dashboard and play demo
+uv run server        # Start the FastAPI server directly in the foreground
+uv run install       # Install the Codex hooks
+```
+
+### Installing Global Codex Hooks (Root / User)
+
+To install the Codex hooks globally for the active user (including `root` if run with `sudo` / Administrator), you can do it in two ways:
+
+#### Option A: Directly using `uvx` (without cloning the repo)
+
+```bash
+sudo uvx --from git+https://github.com/PythonicVarun/agentic-workflow-visualizer.git install
+```
+
+#### Option B: Using `uv run` (if you have cloned the repo)
+
+```bash
+sudo uv run install
+```
+
+This installs the hooks configuration to your home folder or `/root/.codex/hooks.json` utilizing `uvx --from <git-url>`. If run inside the repository clone, it dynamically detects and uses your local/forked git URL; otherwise, it falls back to the official upstream URL automatically.
 
 ## Run The Demo
 
 Use this first. It verifies the dashboard without spending model tokens:
 
 ```bash
-python -m scripts.visualize --demo
+uv run start --demo
 ```
 
 This starts the FastAPI server on:
@@ -80,19 +103,19 @@ The demo replays a branching workflow with:
 Run without opening a browser:
 
 ```bash
-python -m scripts.visualize --demo --no-browser
+uv run start --demo --no-browser
 ```
 
 Run the server in the foreground:
 
 ```bash
-python -m scripts.visualize --serve
+uv run start --serve
 ```
 
 Choose a different port:
 
 ```bash
-python -m scripts.visualize --demo --port 8777
+uv run start --demo --port 8777
 ```
 
 ## Verify The Server
