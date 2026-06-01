@@ -6,7 +6,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SessionStart",
+                        "command": "uv run hook SessionStart",
                         "timeout": 10,
                         "statusMessage": "Starting workflow visualizer"
                     }
@@ -19,7 +19,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" UserPromptSubmit",
+                        "command": "uv run hook UserPromptSubmit",
                         "timeout": 10,
                         "statusMessage": "Visualizing user prompt"
                     }
@@ -32,7 +32,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" PreToolUse",
+                        "command": "uv run hook PreToolUse",
                         "timeout": 10,
                         "statusMessage": "Visualizing tool call"
                     }
@@ -45,7 +45,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" PostToolUse",
+                        "command": "uv run hook PostToolUse",
                         "timeout": 10,
                         "statusMessage": "Visualizing tool result"
                     }
@@ -58,7 +58,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SubagentStart",
+                        "command": "uv run hook SubagentStart",
                         "timeout": 10,
                         "statusMessage": "Visualizing sub-agent start"
                     }
@@ -71,7 +71,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SubagentStop",
+                        "command": "uv run hook SubagentStop",
                         "timeout": 10,
                         "statusMessage": "Visualizing sub-agent stop"
                     }
@@ -84,7 +84,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" Stop",
+                        "command": "uv run hook Stop",
                         "timeout": 10,
                         "statusMessage": "Visualizing final output"
                     }

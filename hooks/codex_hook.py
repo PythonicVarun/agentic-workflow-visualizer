@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from server.codex_adapter import codex_hook_to_event
+
 DEFAULT_PORT = int(os.environ.get("AWV_PORT", "8765"))
 BASE_URL = os.environ.get("AWV_URL", f"http://127.0.0.1:{DEFAULT_PORT}")
 
@@ -25,22 +27,10 @@ def read_payload() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"payload": payload}
 
 
-def find_repo_root(payload: dict[str, Any]) -> Path:
-    env_root = os.environ.get("AWV_REPO_ROOT")
-    if env_root:
-        return Path(env_root).resolve()
-
-    candidates = []
+def current_working_dir(payload: dict[str, Any]) -> Path:
     cwd = payload.get("cwd")
     if cwd:
-        candidates.append(Path(cwd).resolve())
-    candidates.extend(Path(__file__).resolve().parents)
-
-    for candidate in candidates:
-        if (candidate / "server" / "main.py").exists() and (
-            candidate / "ui" / "index.html"
-        ).exists():
-            return candidate
+        return Path(cwd).resolve()
     return Path.cwd().resolve()
 
 
@@ -68,25 +58,18 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def buffered_log_path(repo: Path) -> Path:
+def buffered_log_path(workdir: Path) -> Path:
     override = os.environ.get("AWV_BUFFER_LOG")
     if override:
         return Path(override).expanduser().resolve()
-    return repo / ".awv-logs" / "offline-capture.jsonl"
+    return workdir / ".awv-logs" / "offline-capture.jsonl"
 
 
-def ensure_repo_importable(repo: Path) -> None:
-    repo_str = str(repo)
-    if repo_str not in sys.path:
-        sys.path.insert(0, repo_str)
-
-
-def append_buffered_hook(repo: Path, hook_name: str, payload: dict[str, Any]) -> None:
-    ensure_repo_importable(repo)
-    from server.codex_adapter import codex_hook_to_event
-
+def append_buffered_hook(
+    workdir: Path, hook_name: str, payload: dict[str, Any]
+) -> None:
     event = codex_hook_to_event(hook_name, payload)
-    path = buffered_log_path(repo)
+    path = buffered_log_path(workdir)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "kind": "hook_event",
@@ -105,13 +88,13 @@ def main() -> int:
     hook_name = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = read_payload()
     hook_name = hook_name or str(payload.get("hook_event_name") or "Unknown")
-    repo = find_repo_root(payload)
+    workdir = current_working_dir(payload)
 
     try:
         if server_up():
             post_hook(hook_name, payload)
         else:
-            append_buffered_hook(repo, hook_name, payload)
+            append_buffered_hook(workdir, hook_name, payload)
     except Exception:
         # Visualization should never interfere with the coding agent.
         return 0

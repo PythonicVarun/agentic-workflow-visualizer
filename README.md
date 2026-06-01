@@ -210,10 +210,10 @@ Once trusted, hook behavior is:
 POST /codex-hook/{HookName}
 ```
 
-- if the FastAPI server is **NOT** running, the hook **DOES NOT** start it and instead appends replayable JSONL entries to:
+- if the FastAPI server is **NOT** running, the hook **DOES NOT** start it and instead appends replayable JSONL entries to the current working directory where the hook fired:
 
 ```text
-.awv-logs/offline-capture.jsonl
+<current-working-dir>/.awv-logs/offline-capture.jsonl
 ```
 
 That offline capture can be dragged into the static UI or the live dashboard later.
@@ -248,10 +248,10 @@ Every live workflow is written to a timestamped `.jsonl` file in:
 
 The file stores both the raw Codex hook payload and the normalized workflow event used by the UI.
 
-If hooks fire while the server is not running, they are buffered into:
+If hooks fire while the server is not running, they are buffered into the current working directory:
 
 ```text
-.awv-logs/offline-capture.jsonl
+<current-working-dir>/.awv-logs/offline-capture.jsonl
 ```
 
 Those buffered entries use the same replay-friendly event envelope and can be dropped into the UI directly.
@@ -313,9 +313,8 @@ The hook script supports these overrides:
 ```text
 AWV_PORT       Port for the local server. Default: 8765
 AWV_URL        Full dashboard URL. Default: http://127.0.0.1:$AWV_PORT
-AWV_REPO_ROOT  Explicit repo root for hook execution
 AWV_LOG        Server log path. Default: /tmp/agentic-workflow-visualizer.log
-AWV_BUFFER_LOG Offline hook capture path. Default: <repo>/.awv-logs/offline-capture.jsonl
+AWV_BUFFER_LOG Offline hook capture path. Default: <current-working-dir>/.awv-logs/offline-capture.jsonl
 ```
 
 Example:
