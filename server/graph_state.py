@@ -321,7 +321,7 @@ class GraphState:
         return {
             "sequence": self._sequence,
             "event_type": event.event_type,
-            "label": labels[event.event_type],
+            "label": labels.get(event.event_type, _humanize(event.event_type)),
             "agent_id": event.agent_id,
             "parent_id": event.parent_id,
             "summary": summarize(summary, 130),

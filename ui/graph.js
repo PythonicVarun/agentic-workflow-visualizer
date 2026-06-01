@@ -604,7 +604,11 @@ function renderGraph() {
 }
 
 function renderFeed() {
-    const events = state.graph.events || [];
+    let events = state.graph.events || [];
+    if (state.selectedId) {
+        events = events.filter((event) => event.agent_id === state.selectedId);
+    }
+    els.sequence.textContent = `#${events.length}`;
     els.feed.replaceChildren();
     events.slice(0, 30).forEach((event) => {
         const row = document.createElement("li");
@@ -628,8 +632,9 @@ function renderFeed() {
 
 function renderSelected() {
     const nodes = state.graph.nodes || [];
-    const selected =
-        nodes.find((node) => node.id === state.selectedId) || nodes[0];
+    const selected = state.selectedId
+        ? nodes.find((node) => node.id === state.selectedId)
+        : null;
     if (!selected) {
         els.selectedTitle.textContent = "Primary Agent";
         els.selectedStatus.textContent = "pending";
@@ -648,17 +653,31 @@ function renderSelected() {
     els.selectedAction.textContent = selected.last_action || "Waiting";
 }
 
+function syncSelectedNode() {
+    const nodes = state.graph.nodes || [];
+    if (!nodes.length) {
+        state.selectedId = null;
+        return;
+    }
+    if (state.selectedId !== null) {
+        const exists = nodes.some((node) => node.id === state.selectedId);
+        if (!exists) {
+            state.selectedId = null;
+        }
+    }
+}
+
 function renderMetrics() {
     const nodes = state.graph.nodes || [];
     const edges = state.graph.edges || [];
     els.nodeCount.textContent = String(nodes.length);
     els.edgeCount.textContent = String(edges.length);
     els.activeCount.textContent = String(state.graph.active_count || 0);
-    els.sequence.textContent = `#${state.graph.sequence || 0}`;
 }
 
 function render() {
     renderMetrics();
+    syncSelectedNode();
     renderGraph();
     renderFeed();
     renderSelected();
@@ -693,6 +712,12 @@ async function postCommand(path) {
 
 els.demoButton.addEventListener("click", () => postCommand("/demo"));
 els.resetButton.addEventListener("click", () => postCommand("/reset"));
+els.svg.addEventListener("click", (e) => {
+    if (!e.target.closest(".node")) {
+        state.selectedId = null;
+        render();
+    }
+});
 
 setInterval(render, 1000);
 

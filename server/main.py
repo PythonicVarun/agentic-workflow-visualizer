@@ -86,7 +86,10 @@ async def event(event_payload: WorkflowEvent) -> dict[str, Any]:
 
 @app.post("/codex-hook/{hook_name}")
 async def codex_hook(hook_name: str, request: Request) -> dict[str, Any]:
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
     if not isinstance(payload, dict):
         raise HTTPException(
             status_code=400, detail="Codex hook payload must be a JSON object."
