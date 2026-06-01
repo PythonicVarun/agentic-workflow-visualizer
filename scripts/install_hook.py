@@ -23,7 +23,7 @@ def main() -> int:
     target_file = target_dir / "hooks.json"
 
     git_url = "git+https://github.com/PythonicVarun/agentic-workflow-visualizer.git"
-    print(f"Detected git URL: {git_url}")
+    print(f"Git URL: {git_url}")
 
     hooks_config = {"hooks": {}}
 
@@ -74,9 +74,7 @@ def main() -> int:
         with open(target_file, "w", encoding="utf-8") as f:
             json.dump(hooks_config, f, indent=4)
 
-        print(f"Successfully installed Codex hooks to {target_file}!")
-        print("Generated hooks configuration:")
-        print(json.dumps(hooks_config, indent=2))
+        print(f"Successfully installed Codex hooks to {target_file!r}!")
         return 0
 
     except Exception as e:

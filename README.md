@@ -57,7 +57,12 @@ After installing, the following commands are available:
 uv run start --demo  # Launch the visualizer dashboard and play demo
 uv run server        # Start the FastAPI server directly in the foreground
 uv run install       # Install the Codex hooks
+uv run uninstall     # Uninstall the Codex hooks
 ```
+
+> [!NOTE]
+> The `start` command starts the FastAPI server in the background (logging output to a temporary log file) and opens the web browser dashboard. If you prefer to run the server in the foreground, use `uv run server` or `uv run start --serve`.
+
 
 ### Installing Global Codex Hooks (Root / User)
 
@@ -77,6 +82,27 @@ sudo uv run install
 
 This installs the hooks configuration to your home folder or `/root/.codex/hooks.json` utilizing `uvx --from <git-url>`. If run inside the repository clone, it dynamically detects and uses your local/forked git URL; otherwise, it falls back to the official upstream URL automatically.
 
+### Uninstalling Global Codex Hooks (Root / User)
+
+To uninstall/remove the Codex hooks configuration, you can do it in two ways:
+
+#### Option A: Directly using `uvx` (without cloning the repo)
+
+```bash
+sudo uvx --from git+https://github.com/PythonicVarun/agentic-workflow-visualizer.git uninstall
+```
+
+#### Option B: Using `uv run` (if you have cloned the repo)
+
+```bash
+sudo uv run uninstall
+```
+
+> [!NOTE]
+> The uninstallation command only removes visualizer-specific hooks from `hooks.json` and preserves all other user-defined hooks. If no other hooks remain after filtering, the `hooks.json` file is deleted completely.
+
+
+
 ## Run The Demo
 
 Use this first. It verifies the dashboard without spending model tokens:
@@ -85,7 +111,7 @@ Use this first. It verifies the dashboard without spending model tokens:
 uv run start --demo
 ```
 
-This starts the FastAPI server on:
+This starts the FastAPI server in the background on:
 
 ```text
 http://127.0.0.1:8765

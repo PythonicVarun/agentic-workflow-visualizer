@@ -19,7 +19,7 @@ start = "scripts.visualize:main"
 server = "server.main:run"
 hook = "hooks.codex_hook:main"
 install = "scripts.install_hook:main"
-
+uninstall = "scripts.uninstall_hook:main"
 
 [tool.setuptools.packages.find]
 include = ["server", "scripts", "ui", "hooks"]
