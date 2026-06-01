@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from contextlib import suppress
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -21,6 +22,19 @@ app = FastAPI(title="Agentic Workflow Visualizer")
 graph = GraphState()
 subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
 demo_task: asyncio.Task[None] | None = None
+
+
+async def _cancel_demo_task() -> None:
+    global demo_task
+    if demo_task and not demo_task.done():
+        demo_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await demo_task
+    demo_task = None
+
+
+def _clear_subscribers() -> None:
+    subscribers.clear()
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -84,6 +98,7 @@ async def codex_hook(hook_name: str, request: Request) -> dict[str, Any]:
 
 @app.post("/reset")
 async def reset() -> dict[str, Any]:
+    await _cancel_demo_task()
     graph.reset()
     await publish("reset")
     return {"ok": True, "state": graph.snapshot()}
@@ -126,6 +141,12 @@ async def stream(request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    await _cancel_demo_task()
+    _clear_subscribers()
 
 
 app.mount("/static", StaticFiles(directory=UI_DIR), name="static")
