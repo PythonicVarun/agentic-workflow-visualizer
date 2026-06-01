@@ -1,0 +1,95 @@
+{
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "startup|resume|clear|compact",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SessionStart",
+                        "timeout": 10,
+                        "statusMessage": "Starting workflow visualizer"
+                    }
+                ]
+            }
+        ],
+        "UserPromptSubmit": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" UserPromptSubmit",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing user prompt"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" PreToolUse",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing tool call"
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" PostToolUse",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing tool result"
+                    }
+                ]
+            }
+        ],
+        "SubagentStart": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SubagentStart",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing sub-agent start"
+                    }
+                ]
+            }
+        ],
+        "SubagentStop": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" SubagentStop",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing sub-agent stop"
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$(git rev-parse --show-toplevel)/hooks/codex_hook.py\" Stop",
+                        "timeout": 10,
+                        "statusMessage": "Visualizing final output"
+                    }
+                ]
+            }
+        ]
+    }
+}

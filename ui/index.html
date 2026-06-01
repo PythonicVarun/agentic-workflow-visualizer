@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Agentic Workflow Visualizer</title>
+        <link
+            rel="icon"
+            href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M8 16h16M16 8v16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
+        />
+        <link rel="stylesheet" href="/static/style.css" />
+    </head>
+    <body>
+        <div class="app-shell">
+            <header class="topbar">
+                <div class="brand">
+                    <span class="eyebrow">Live Codex activity</span>
+                    <h1>Agentic Workflow Visualizer</h1>
+                </div>
+                <div class="topbar-actions">
+                    <div class="connection" id="connection">
+                        <span class="connection-dot"></span>
+                        <span id="connection-text">Connecting</span>
+                    </div>
+                    <button id="demo-button" type="button">Run Demo</button>
+                    <button id="reset-button" type="button">Reset</button>
+                </div>
+            </header>
+
+            <main class="workspace">
+                <section class="graph-pane" aria-label="Workflow graph">
+                    <div class="graph-head">
+                        <div class="metric">
+                            <span class="metric-value" id="node-count">0</span>
+                            <span class="metric-label">Agents</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value" id="edge-count">0</span>
+                            <span class="metric-label">Links</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value" id="active-count"
+                                >0</span
+                            >
+                            <span class="metric-label">Running</span>
+                        </div>
+                    </div>
+                    <div class="graph-stage">
+                        <svg
+                            id="graph"
+                            role="img"
+                            aria-label="Live agent workflow graph"
+                        ></svg>
+                        <div class="empty-state" id="empty-state">
+                            <span>Waiting for activity</span>
+                        </div>
+                    </div>
+                </section>
+
+                <aside class="inspector" aria-label="Workflow details">
+                    <section class="panel node-panel">
+                        <h2 id="selected-title">Primary Agent</h2>
+                        <dl>
+                            <div>
+                                <dt>Status</dt>
+                                <dd id="selected-status">pending</dd>
+                            </div>
+                            <div>
+                                <dt>Role</dt>
+                                <dd id="selected-role">agent</dd>
+                            </div>
+                            <div>
+                                <dt>Elapsed</dt>
+                                <dd id="selected-elapsed">0s</dd>
+                            </div>
+                            <div>
+                                <dt>Tools</dt>
+                                <dd id="selected-tools">0</dd>
+                            </div>
+                        </dl>
+                        <p id="selected-action" class="selected-action">
+                            Waiting
+                        </p>
+                    </section>
+
+                    <section class="panel feed-panel">
+                        <div class="feed-heading">
+                            <h2>Event Feed</h2>
+                            <span id="sequence">0</span>
+                        </div>
+                        <ol id="event-feed" class="event-feed"></ol>
+                    </section>
+                </aside>
+            </main>
+        </div>
+
+        <script type="module" src="/static/graph.js"></script>
+    </body>
+</html>

@@ -1,0 +1,21 @@
+{
+    "name": "agentic-workflow-visualizer",
+    "version": "0.1.0",
+    "description": "Launch a local browser dashboard that visualizes Codex hook activity as a live workflow graph.",
+    "author": {
+        "name": "Local developer"
+    },
+    "skills": "./skills/",
+    "interface": {
+        "displayName": "Agentic Workflow Visualizer",
+        "shortDescription": "Visualize Codex tool calls and sub-agents.",
+        "longDescription": "Agentic Workflow Visualizer starts a local FastAPI dashboard and captures Codex lifecycle hooks into a live graph of agents, tools, and results.",
+        "developerName": "Local developer",
+        "category": "Productivity",
+        "capabilities": ["Interactive"],
+        "defaultPrompt": [
+            "Launch the workflow visualizer.",
+            "Run the visualizer demo."
+        ]
+    }
+}
