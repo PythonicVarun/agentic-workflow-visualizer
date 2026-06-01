@@ -217,7 +217,13 @@ h2 {
 
 .graph-stage {
     min-height: 0;
+    overflow: hidden;
     position: relative;
+    cursor: grab;
+}
+
+.graph-stage.grabbing {
+    cursor: grabbing;
 }
 
 #graph {
@@ -225,6 +231,70 @@ h2 {
     height: 100%;
     min-height: 0;
     width: 100%;
+}
+
+/* ── Zoom Controls ── */
+
+.zoom-controls {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(216, 222, 230, 0.7);
+    border-radius: 10px;
+    bottom: 16px;
+    box-shadow:
+        0 4px 16px rgba(24, 33, 43, 0.1),
+        0 1px 3px rgba(24, 33, 43, 0.06);
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    position: absolute;
+    right: 16px;
+    z-index: 10;
+}
+
+.zoom-controls button {
+    align-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    color: var(--ink);
+    cursor: pointer;
+    display: inline-flex;
+    height: 32px;
+    justify-content: center;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+    width: 32px;
+}
+
+.zoom-controls button:hover {
+    background: var(--surface-strong);
+    border: none;
+    color: var(--accent);
+}
+
+.zoom-controls button:active {
+    background: var(--line);
+    transform: scale(0.93);
+}
+
+.zoom-level {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 750;
+    min-width: 42px;
+    text-align: center;
+    user-select: none;
+}
+
+.zoom-divider {
+    background: var(--line);
+    height: 18px;
+    margin: 0 2px;
+    width: 1px;
 }
 
 .empty-state {

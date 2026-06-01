@@ -24,7 +24,273 @@ const els = {
     selectedAction: document.querySelector("#selected-action"),
     demoButton: document.querySelector("#demo-button"),
     resetButton: document.querySelector("#reset-button"),
+    stage: document.querySelector("#graph-stage"),
+    zoomIn: document.querySelector("#zoom-in"),
+    zoomOut: document.querySelector("#zoom-out"),
+    zoomFit: document.querySelector("#zoom-fit"),
+    zoomLevel: document.querySelector("#zoom-level"),
 };
+
+/* ── Zoom & Pan Controller (viewBox-based for crisp vector rendering) ── */
+
+const zoomPan = {
+    /* viewBox state: vx, vy is the top-left corner; vw, vh is the visible area */
+    vx: 0,
+    vy: 0,
+    vw: 960,
+    vh: 520,
+    /* Full content dimensions (set by buildLayout) */
+    contentW: 960,
+    contentH: 520,
+    minScale: 0.25,
+    maxScale: 4,
+    /* Drag state */
+    dragging: false,
+    dragPending: false,
+    dragPointerId: 0,
+    dragStartX: 0,
+    dragStartY: 0,
+    vxStart: 0,
+    vyStart: 0,
+    /* Touch state */
+    lastPinchDist: 0,
+    /* Animation */
+    animId: null,
+};
+
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+/** Current zoom scale = how much the content is magnified */
+function currentScale() {
+    const stageRect = els.stage.getBoundingClientRect();
+    if (!stageRect.width) return 1;
+    return stageRect.width / zoomPan.vw;
+}
+
+function applyViewBox() {
+    els.svg.setAttribute(
+        "viewBox",
+        `${zoomPan.vx} ${zoomPan.vy} ${zoomPan.vw} ${zoomPan.vh}`,
+    );
+    const pct = Math.round(currentScale() * 100);
+    els.zoomLevel.textContent = `${pct}%`;
+}
+
+function animateViewBox(targetVx, targetVy, targetVw, targetVh, duration = 280) {
+    if (zoomPan.animId) cancelAnimationFrame(zoomPan.animId);
+    const startVx = zoomPan.vx, startVy = zoomPan.vy;
+    const startVw = zoomPan.vw, startVh = zoomPan.vh;
+    const t0 = performance.now();
+    function tick(now) {
+        const elapsed = now - t0;
+        const progress = Math.min(elapsed / duration, 1);
+        /* ease-out cubic */
+        const ease = 1 - Math.pow(1 - progress, 3);
+        zoomPan.vx = startVx + (targetVx - startVx) * ease;
+        zoomPan.vy = startVy + (targetVy - startVy) * ease;
+        zoomPan.vw = startVw + (targetVw - startVw) * ease;
+        zoomPan.vh = startVh + (targetVh - startVh) * ease;
+        applyViewBox();
+        if (progress < 1) {
+            zoomPan.animId = requestAnimationFrame(tick);
+        } else {
+            zoomPan.animId = null;
+        }
+    }
+    zoomPan.animId = requestAnimationFrame(tick);
+}
+
+/**
+ * Zoom towards a point (in screen/stage coordinates).
+ * We convert that point to SVG coordinates, compute the new vw/vh,
+ * then reposition vx/vy so the SVG point stays under the cursor.
+ */
+function zoomAtPoint(factor, screenX, screenY, smooth = false) {
+    const stageRect = els.stage.getBoundingClientRect();
+    const stageW = stageRect.width;
+    const stageH = stageRect.height;
+    if (!stageW || !stageH) return;
+
+    /* Cursor position as fraction of the stage */
+    const fx = (screenX - stageRect.left) / stageW;
+    const fy = (screenY - stageRect.top) / stageH;
+
+    /* SVG coordinate under cursor */
+    const svgX = zoomPan.vx + fx * zoomPan.vw;
+    const svgY = zoomPan.vy + fy * zoomPan.vh;
+
+    /* New visible dimensions */
+    let newVw = zoomPan.vw / factor;
+    let newVh = zoomPan.vh / factor;
+
+    /* Clamp by min/max scale */
+    const newScale = stageW / newVw;
+    const clamped = clamp(newScale, zoomPan.minScale, zoomPan.maxScale);
+    if (clamped !== newScale) {
+        newVw = stageW / clamped;
+        newVh = stageH / clamped;
+    }
+
+    /* Keep the SVG point under the cursor */
+    const newVx = svgX - fx * newVw;
+    const newVy = svgY - fy * newVh;
+
+    if (smooth) {
+        animateViewBox(newVx, newVy, newVw, newVh);
+    } else {
+        zoomPan.vx = newVx;
+        zoomPan.vy = newVy;
+        zoomPan.vw = newVw;
+        zoomPan.vh = newVh;
+        applyViewBox();
+    }
+}
+
+function fitToView(smooth = true) {
+    const stageRect = els.stage.getBoundingClientRect();
+    if (!stageRect.width || !stageRect.height) return;
+    const pad = 40; /* SVG-coordinate padding around the content */
+    const cw = zoomPan.contentW + pad * 2;
+    const ch = zoomPan.contentH + pad * 2;
+    const stageAspect = stageRect.width / stageRect.height;
+    const contentAspect = cw / ch;
+    let vw, vh;
+    if (contentAspect > stageAspect) {
+        vw = cw;
+        vh = cw / stageAspect;
+    } else {
+        vh = ch;
+        vw = ch * stageAspect;
+    }
+    const vx = -pad + (zoomPan.contentW - vw + pad * 2) / 2;
+    const vy = -pad + (zoomPan.contentH - vh + pad * 2) / 2;
+    if (smooth) {
+        animateViewBox(vx, vy, vw, vh);
+    } else {
+        zoomPan.vx = vx;
+        zoomPan.vy = vy;
+        zoomPan.vw = vw;
+        zoomPan.vh = vh;
+        applyViewBox();
+    }
+}
+
+function zoomByStep(factor) {
+    const stageRect = els.stage.getBoundingClientRect();
+    const cx = stageRect.left + stageRect.width / 2;
+    const cy = stageRect.top + stageRect.height / 2;
+    zoomAtPoint(factor, cx, cy, true);
+}
+
+/* ── Wheel zoom ── */
+
+els.stage.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY;
+    const factor = 1 + Math.sign(delta) * 0.12;
+    zoomAtPoint(factor, e.clientX, e.clientY);
+}, { passive: false });
+
+/* ── Pointer drag for pan ── */
+
+const DRAG_THRESHOLD = 5; /* px – must move this far before pan activates */
+
+els.stage.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".zoom-controls")) return;
+    /* Don't start pan immediately; record intent and wait for threshold */
+    zoomPan.dragging = false;
+    zoomPan.dragPending = true;
+    zoomPan.dragStartX = e.clientX;
+    zoomPan.dragStartY = e.clientY;
+    zoomPan.vxStart = zoomPan.vx;
+    zoomPan.vyStart = zoomPan.vy;
+    zoomPan.dragPointerId = e.pointerId;
+});
+
+els.stage.addEventListener("pointermove", (e) => {
+    if (!zoomPan.dragPending && !zoomPan.dragging) return;
+
+    const dx = e.clientX - zoomPan.dragStartX;
+    const dy = e.clientY - zoomPan.dragStartY;
+
+    /* Still under threshold – don't pan yet */
+    if (zoomPan.dragPending && !zoomPan.dragging) {
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        /* Threshold exceeded → promote to real drag */
+        zoomPan.dragPending = false;
+        zoomPan.dragging = true;
+        els.stage.classList.add("grabbing");
+        els.stage.setPointerCapture(zoomPan.dragPointerId);
+    }
+
+    const stageRect = els.stage.getBoundingClientRect();
+    const svgPerPx = zoomPan.vw / stageRect.width;
+    zoomPan.vx = zoomPan.vxStart - dx * svgPerPx;
+    zoomPan.vy = zoomPan.vyStart - dy * svgPerPx;
+    applyViewBox();
+});
+
+els.stage.addEventListener("pointerup", () => {
+    zoomPan.dragging = false;
+    zoomPan.dragPending = false;
+    els.stage.classList.remove("grabbing");
+});
+
+els.stage.addEventListener("pointercancel", () => {
+    zoomPan.dragging = false;
+    zoomPan.dragPending = false;
+    els.stage.classList.remove("grabbing");
+});
+
+/* ── Touch pinch zoom ── */
+
+function pinchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+}
+
+els.stage.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+        zoomPan.lastPinchDist = pinchDist(e.touches);
+    }
+}, { passive: true });
+
+els.stage.addEventListener("touchmove", (e) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const dist = pinchDist(e.touches);
+    const factor = dist / zoomPan.lastPinchDist;
+    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    zoomAtPoint(factor, cx, cy);
+    zoomPan.lastPinchDist = dist;
+}, { passive: false });
+
+/* ── Button controls ── */
+
+els.zoomIn.addEventListener("click", (e) => { e.stopPropagation(); zoomByStep(1.3); });
+els.zoomOut.addEventListener("click", (e) => { e.stopPropagation(); zoomByStep(1 / 1.3); });
+els.zoomFit.addEventListener("click", (e) => { e.stopPropagation(); fitToView(); });
+
+/* ── Keyboard shortcuts ── */
+
+document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        zoomByStep(1.3);
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "-") {
+        e.preventDefault();
+        zoomByStep(1 / 1.3);
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "0") {
+        e.preventDefault();
+        fitToView();
+    }
+});
 
 function createSvg(tag, attrs = {}, parent = els.svg) {
     const element = document.createElementNS(SVG_NS, tag);
@@ -249,25 +515,46 @@ function drawNode(node, box) {
         trim(node.last_action, 39),
     );
 
-    const pillWidth = 66;
+    const pillWidth = 72;
+    const pillX = box.width - pillWidth - 12;
+    const pillY = 12;
+    const pillHeight = 22;
     createSvg(
         "rect",
         {
             class: "status-pill",
-            x: box.width - pillWidth - 14,
-            y: 14,
+            x: pillX,
+            y: pillY,
             width: pillWidth,
-            height: 22,
+            height: pillHeight,
             rx: 8,
         },
         group,
     );
-    nodeText(
+    createSvg(
+        "text",
+        {
+            class: "status-text",
+            x: pillX + pillWidth / 2,
+            y: pillY + pillHeight / 2,
+            "text-anchor": "middle",
+            "dominant-baseline": "central",
+        },
         group,
-        { class: "status-text", x: box.width - pillWidth + 3, y: 29 },
-        status,
-    );
+    ).textContent = status;
 }
+
+/* Track whether the user has ever interacted with zoom/pan.
+   If not, each renderGraph auto-fits; once the user takes control we stop. */
+let userHasInteracted = false;
+
+function markUserInteraction() {
+    userHasInteracted = true;
+}
+els.stage.addEventListener("wheel", markUserInteraction, { once: true });
+els.stage.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".zoom-controls")) markUserInteraction();
+}, { once: true });
 
 function renderGraph() {
     const nodes = state.graph.nodes || [];
@@ -277,19 +564,29 @@ function renderGraph() {
 
     els.empty.classList.toggle("hidden", nodes.length > 0);
     if (!nodes.length) {
-        els.svg.setAttribute("viewBox", "0 0 960 520");
+        zoomPan.contentW = 960;
+        zoomPan.contentH = 520;
+        if (!userHasInteracted) fitToView(false);
+        applyViewBox();
         return;
     }
 
     const { layout, width, height } = buildLayout(nodes, edges);
-    els.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    els.svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+    zoomPan.contentW = width;
+    zoomPan.contentH = height;
 
     edges.forEach((edge) => drawEdge(edge, layout));
     nodes.forEach((node) => {
         const box = layout.get(node.id);
         if (box) drawNode(node, box);
     });
+
+    if (!userHasInteracted) {
+        fitToView(false);
+    }
+    /* Always apply the current viewBox (keeps user's zoom/pan intact) */
+    applyViewBox();
 }
 
 function renderFeed() {
@@ -388,3 +685,4 @@ setInterval(render, 1000);
 loadState()
     .then(connectStream)
     .catch(() => setConnection(false));
+
