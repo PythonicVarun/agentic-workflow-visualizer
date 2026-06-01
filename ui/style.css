@@ -265,7 +265,9 @@ h2 {
     height: 32px;
     justify-content: center;
     padding: 0;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
     width: 32px;
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import subprocess
@@ -14,8 +15,13 @@ from typing import Any
 
 DEFAULT_PORT = int(os.environ.get("AWV_PORT", "8765"))
 BASE_URL = os.environ.get("AWV_URL", f"http://127.0.0.1:{DEFAULT_PORT}")
-LOG_PATH = Path(os.environ.get("AWV_LOG", "/tmp/agentic-workflow-visualizer.log"))
-BROWSER_MARKER = Path(f"/tmp/agentic-workflow-visualizer-browser-{DEFAULT_PORT}.marker")
+username = getpass.getuser()
+LOG_PATH = Path(
+    os.environ.get("AWV_LOG", f"/tmp/agentic-workflow-visualizer-{username}.log")
+)
+BROWSER_MARKER = Path(
+    f"/tmp/agentic-workflow-visualizer-browser-{username}-{DEFAULT_PORT}.marker"
+)
 
 
 def read_payload() -> dict[str, Any]:

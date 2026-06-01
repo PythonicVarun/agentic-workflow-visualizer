@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import subprocess
 import sys
 import time
@@ -11,7 +12,8 @@ from pathlib import Path
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-LOG_PATH = Path("/tmp/agentic-workflow-visualizer.log")
+username = getpass.getuser()
+LOG_PATH = Path(f"/tmp/agentic-workflow-visualizer-{username}.log")
 
 
 def repo_root() -> Path:

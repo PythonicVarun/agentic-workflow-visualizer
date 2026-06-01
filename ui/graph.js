@@ -78,10 +78,18 @@ function applyViewBox() {
     els.zoomLevel.textContent = `${pct}%`;
 }
 
-function animateViewBox(targetVx, targetVy, targetVw, targetVh, duration = 280) {
+function animateViewBox(
+    targetVx,
+    targetVy,
+    targetVw,
+    targetVh,
+    duration = 280,
+) {
     if (zoomPan.animId) cancelAnimationFrame(zoomPan.animId);
-    const startVx = zoomPan.vx, startVy = zoomPan.vy;
-    const startVw = zoomPan.vw, startVh = zoomPan.vh;
+    const startVx = zoomPan.vx,
+        startVy = zoomPan.vy;
+    const startVw = zoomPan.vw,
+        startVh = zoomPan.vh;
     const t0 = performance.now();
     function tick(now) {
         const elapsed = now - t0;
@@ -186,12 +194,16 @@ function zoomByStep(factor) {
 
 /* ── Wheel zoom ── */
 
-els.stage.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const delta = -e.deltaY;
-    const factor = 1 + Math.sign(delta) * 0.12;
-    zoomAtPoint(factor, e.clientX, e.clientY);
-}, { passive: false });
+els.stage.addEventListener(
+    "wheel",
+    (e) => {
+        e.preventDefault();
+        const delta = -e.deltaY;
+        const factor = 1 + Math.sign(delta) * 0.12;
+        zoomAtPoint(factor, e.clientX, e.clientY);
+    },
+    { passive: false },
+);
 
 /* ── Pointer drag for pan ── */
 
@@ -218,7 +230,8 @@ els.stage.addEventListener("pointermove", (e) => {
 
     /* Still under threshold – don't pan yet */
     if (zoomPan.dragPending && !zoomPan.dragging) {
-        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD)
+            return;
         /* Threshold exceeded → promote to real drag */
         zoomPan.dragPending = false;
         zoomPan.dragging = true;
@@ -253,28 +266,45 @@ function pinchDist(touches) {
     return Math.hypot(dx, dy);
 }
 
-els.stage.addEventListener("touchstart", (e) => {
-    if (e.touches.length === 2) {
-        zoomPan.lastPinchDist = pinchDist(e.touches);
-    }
-}, { passive: true });
+els.stage.addEventListener(
+    "touchstart",
+    (e) => {
+        if (e.touches.length === 2) {
+            zoomPan.lastPinchDist = pinchDist(e.touches);
+        }
+    },
+    { passive: true },
+);
 
-els.stage.addEventListener("touchmove", (e) => {
-    if (e.touches.length !== 2) return;
-    e.preventDefault();
-    const dist = pinchDist(e.touches);
-    const factor = dist / zoomPan.lastPinchDist;
-    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    zoomAtPoint(factor, cx, cy);
-    zoomPan.lastPinchDist = dist;
-}, { passive: false });
+els.stage.addEventListener(
+    "touchmove",
+    (e) => {
+        if (e.touches.length !== 2) return;
+        e.preventDefault();
+        const dist = pinchDist(e.touches);
+        const factor = dist / zoomPan.lastPinchDist;
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        zoomAtPoint(factor, cx, cy);
+        zoomPan.lastPinchDist = dist;
+    },
+    { passive: false },
+);
 
 /* ── Button controls ── */
 
-els.zoomIn.addEventListener("click", (e) => { e.stopPropagation(); zoomByStep(1.3); });
-els.zoomOut.addEventListener("click", (e) => { e.stopPropagation(); zoomByStep(1 / 1.3); });
-els.zoomFit.addEventListener("click", (e) => { e.stopPropagation(); fitToView(); });
+els.zoomIn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomByStep(1.3);
+});
+els.zoomOut.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomByStep(1 / 1.3);
+});
+els.zoomFit.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fitToView();
+});
 
 /* ── Keyboard shortcuts ── */
 
@@ -533,9 +563,13 @@ function markUserInteraction() {
     userHasInteracted = true;
 }
 els.stage.addEventListener("wheel", markUserInteraction, { once: true });
-els.stage.addEventListener("pointerdown", (e) => {
-    if (!e.target.closest(".zoom-controls")) markUserInteraction();
-}, { once: true });
+els.stage.addEventListener(
+    "pointerdown",
+    (e) => {
+        if (!e.target.closest(".zoom-controls")) markUserInteraction();
+    },
+    { once: true },
+);
 
 function renderGraph() {
     const nodes = state.graph.nodes || [];
@@ -665,4 +699,3 @@ setInterval(render, 1000);
 loadState()
     .then(connectStream)
     .catch(() => setConnection(false));
-

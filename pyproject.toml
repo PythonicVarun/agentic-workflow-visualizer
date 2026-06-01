@@ -15,8 +15,16 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-agentic-visualizer = "scripts.visualize:main"
-agentic-visualizer-server = "server.main:run"
+start = "scripts.visualize:main"
+server = "server.main:run"
+hook = "hooks.codex_hook:main"
+install = "scripts.install_hook:main"
+
 
 [tool.setuptools.packages.find]
-include = ["server", "scripts"]
+include = ["server", "scripts", "ui", "hooks"]
+
+[tool.setuptools.package-data]
+ui = ["*.html", "*.css", "*.js"]
+hooks = ["*.py"]
+
