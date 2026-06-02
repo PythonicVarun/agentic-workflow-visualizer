@@ -1,0 +1,11 @@
+[
+    {
+        "file": "codex-multi-agent-demo.jsonl",
+        "title": "Multi-Agent Exploration",
+        "description": "Five sub-agents exploring a PowerShell toolkit directory, running scripts, and generating reports — showcases parallel agent workflows with GPT-5.4.",
+        "model": "gpt-5.4",
+        "events": 101,
+        "agents": 6,
+        "duration": "~10 min"
+    }
+]

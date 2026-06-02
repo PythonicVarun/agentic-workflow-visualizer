@@ -205,6 +205,53 @@
                             hidden
                         />
 
+                        <!-- Demo Logs Library -->
+                        <div class="demo-logs-section" id="demo-logs-section">
+                            <button
+                                class="demo-logs-toggle"
+                                id="demo-logs-toggle"
+                                type="button"
+                                aria-expanded="true"
+                            >
+                                <svg
+                                    class="demo-logs-toggle-icon"
+                                    viewBox="0 0 16 16"
+                                    width="14"
+                                    height="14"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path d="M2 3h12M2 8h12M2 13h12" />
+                                </svg>
+                                <span>Demo Logs</span>
+                                <span
+                                    class="demo-logs-count"
+                                    id="demo-logs-count"
+                                    >0</span
+                                >
+                                <svg
+                                    class="demo-logs-chevron"
+                                    id="demo-logs-chevron"
+                                    viewBox="0 0 12 12"
+                                    width="12"
+                                    height="12"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                >
+                                    <polyline points="3,4.5 6,7.5 9,4.5" />
+                                </svg>
+                            </button>
+                            <ol class="demo-logs-list" id="demo-logs-list"></ol>
+                            <div class="demo-logs-empty" id="demo-logs-empty">
+                                No demo logs available.
+                            </div>
+                        </div>
+
                         <!-- Replay Player Controls -->
                         <div class="replay-player" id="replay-player">
                             <div class="replay-clock-row">

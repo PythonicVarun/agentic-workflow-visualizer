@@ -59,6 +59,13 @@ const els = {
     replayStep: document.querySelector("#replay-step"),
     replaySpeed: document.querySelector("#replay-speed"),
     replayElapsed: document.querySelector("#replay-elapsed"),
+
+    // Demo logs elements
+    demoLogsSection: document.querySelector("#demo-logs-section"),
+    demoLogsToggle: document.querySelector("#demo-logs-toggle"),
+    demoLogsCount: document.querySelector("#demo-logs-count"),
+    demoLogsList: document.querySelector("#demo-logs-list"),
+    demoLogsEmpty: document.querySelector("#demo-logs-empty"),
 };
 
 const zoomPan = {
@@ -1773,6 +1780,159 @@ function setupResizers() {
 }
 
 setupResizers();
+
+/* ═══════════════════════════════════════════════════════════ */
+/* Demo Logs Library                                           */
+/* ═══════════════════════════════════════════════════════════ */
+
+const demoLogs = {
+    entries: [],
+    loaded: false,
+};
+
+async function fetchDemoLogs() {
+    try {
+        const response = await fetch("./logs/index.json", {
+            cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Failed to fetch demo logs index");
+        demoLogs.entries = await response.json();
+        demoLogs.loaded = true;
+    } catch {
+        demoLogs.entries = [];
+        demoLogs.loaded = true;
+    }
+    renderDemoLogs();
+}
+
+function renderDemoLogs() {
+    const list = els.demoLogsList;
+    const empty = els.demoLogsEmpty;
+    const count = els.demoLogsCount;
+    const entries = demoLogs.entries;
+
+    count.textContent = String(entries.length);
+
+    if (!entries.length) {
+        list.innerHTML = "";
+        list.style.display = "none";
+        empty.style.display = "";
+        return;
+    }
+
+    empty.style.display = "none";
+    list.style.display = "";
+    list.innerHTML = "";
+
+    entries.forEach((entry, index) => {
+        const li = document.createElement("li");
+        li.className = "demo-log-card";
+        li.dataset.index = String(index);
+        li.setAttribute("role", "button");
+        li.setAttribute("tabindex", "0");
+        li.title = `Load: ${entry.title}`;
+
+        const header = document.createElement("div");
+        header.className = "demo-log-header";
+
+        const playIcon = document.createElement("span");
+        playIcon.className = "demo-log-play-icon";
+        playIcon.innerHTML = `<svg viewBox="0 0 14 14" width="12" height="12" fill="currentColor"><polygon points="4,2 12,7 4,12"/></svg>`;
+
+        const title = document.createElement("span");
+        title.className = "demo-log-title";
+        title.textContent = entry.title || entry.file;
+
+        header.appendChild(playIcon);
+        header.appendChild(title);
+        li.appendChild(header);
+
+        if (entry.description) {
+            const desc = document.createElement("p");
+            desc.className = "demo-log-description";
+            desc.textContent = entry.description;
+            li.appendChild(desc);
+        }
+
+        const meta = document.createElement("div");
+        meta.className = "demo-log-meta";
+
+        if (entry.model) {
+            const pill = document.createElement("span");
+            pill.className = "demo-log-pill model-pill";
+            pill.textContent = entry.model;
+            meta.appendChild(pill);
+        }
+        if (entry.events) {
+            const pill = document.createElement("span");
+            pill.className = "demo-log-pill";
+            pill.textContent = `${entry.events} events`;
+            meta.appendChild(pill);
+        }
+        if (entry.agents) {
+            const pill = document.createElement("span");
+            pill.className = "demo-log-pill";
+            pill.textContent = `${entry.agents} agents`;
+            meta.appendChild(pill);
+        }
+        if (entry.duration) {
+            const pill = document.createElement("span");
+            pill.className = "demo-log-pill";
+            pill.textContent = entry.duration;
+            meta.appendChild(pill);
+        }
+
+        li.appendChild(meta);
+        list.appendChild(li);
+    });
+}
+
+async function loadDemoLog(index) {
+    const entry = demoLogs.entries[index];
+    if (!entry) return;
+
+    const card = els.demoLogsList.querySelector(`[data-index="${index}"]`);
+    if (card) card.classList.add("is-loading");
+
+    try {
+        const response = await fetch(`./logs/${entry.file}`);
+        if (!response.ok) throw new Error(`Failed to load ${entry.file}`);
+        const content = await response.text();
+        await replayLogContent(content, entry.title || entry.file);
+    } catch (error) {
+        window.alert(
+            error instanceof Error ? error.message : "Failed to load demo log.",
+        );
+    } finally {
+        if (card) card.classList.remove("is-loading");
+    }
+}
+
+// Wire up demo logs interactions
+els.demoLogsList.addEventListener("click", (e) => {
+    const card = e.target.closest(".demo-log-card");
+    if (!card) return;
+    const index = parseInt(card.dataset.index, 10);
+    if (!isNaN(index)) loadDemoLog(index);
+});
+
+els.demoLogsList.addEventListener("keydown", (e) => {
+    if (e.code !== "Enter" && e.code !== "Space") return;
+    const card = e.target.closest(".demo-log-card");
+    if (!card) return;
+    e.preventDefault();
+    const index = parseInt(card.dataset.index, 10);
+    if (!isNaN(index)) loadDemoLog(index);
+});
+
+els.demoLogsToggle.addEventListener("click", () => {
+    const section = els.demoLogsSection;
+    const isCollapsed = section.classList.toggle("collapsed");
+    els.demoLogsToggle.setAttribute("aria-expanded", String(!isCollapsed));
+});
+
+// Fetch demo logs on startup
+fetchDemoLogs();
 
 loadState()
     .then(() => {
