@@ -168,10 +168,16 @@ async def demo() -> dict[str, str]:
 
 @app.get("/log/current")
 async def current_log() -> FileResponse:
+    current_path = log_store.current_path
+    if current_path is None:
+        raise HTTPException(
+            status_code=404, detail="No workflow log has been created yet."
+        )
+
     return FileResponse(
-        log_store.current_path,
+        current_path,
         media_type="application/x-ndjson",
-        filename=log_store.current_path.name,
+        filename=current_path.name,
     )
 
 

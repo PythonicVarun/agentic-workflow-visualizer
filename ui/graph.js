@@ -46,6 +46,18 @@ const els = {
     zoomOut: document.querySelector("#zoom-out"),
     zoomFit: document.querySelector("#zoom-fit"),
     zoomLevel: document.querySelector("#zoom-level"),
+    // Replay player elements
+    replayPlayer: document.querySelector("#replay-player"),
+    replayClockTime: document.querySelector("#replay-clock-time"),
+    replayEvtCurrent: document.querySelector("#replay-evt-current"),
+    replayEvtTotal: document.querySelector("#replay-evt-total"),
+    replayScrubber: document.querySelector("#replay-scrubber"),
+    replayPlay: document.querySelector("#replay-play"),
+    replayPlayIcon: document.querySelector("#replay-play-icon"),
+    replayRewind: document.querySelector("#replay-rewind"),
+    replayStep: document.querySelector("#replay-step"),
+    replaySpeed: document.querySelector("#replay-speed"),
+    replayElapsed: document.querySelector("#replay-elapsed"),
 };
 
 const zoomPan = {
@@ -584,11 +596,12 @@ function buildGraphFromEvents(events, logDetails = {}) {
             }
             case "user_input": {
                 const prompt = data.prompt || data.input || "Prompt received";
-                touch(event, {
+                const node = touch(event, {
                     action: `User prompt: ${summarize(prompt, 110)}`,
                     role: "primary",
                     label: data.label || "Primary Agent",
                 });
+                node.spawn_prompt = prompt;
                 break;
             }
             case "agent_output": {
@@ -1115,12 +1128,18 @@ function renderLogDetails() {
         ? `${modeLabel} | ${trim(fileName, 22)}`
         : modeLabel;
     els.logFileName.textContent = trim(fileName || "No log", 28);
-    els.logPath.textContent =
-        details.current_path ||
-        (state.backendAvailable
-            ? "Current log path will appear here."
-            : "Static host mode. Drop a saved JSONL log to visualize it locally.");
-    if (state.backendAvailable) {
+    els.logPath.textContent = details.current_path
+        ? details.current_path
+        : mode === "replay"
+          ? "Viewing uploaded replay log."
+          : state.backendAvailable
+            ? "Current log path will appear here after the first hook event."
+            : "Static host mode. Drop a saved JSONL log to visualize it locally.";
+    const canDownloadLiveLog =
+        state.backendAvailable &&
+        mode === "live" &&
+        Boolean(details.current_path);
+    if (canDownloadLiveLog) {
         els.downloadLog.href = "/log/current";
         els.downloadLog.removeAttribute("aria-disabled");
         els.downloadLog.classList.remove("is-disabled");
@@ -1169,6 +1188,7 @@ async function loadState() {
 }
 
 function handleSse(event) {
+    if (replay.active) return;
     const payload = JSON.parse(event.data);
     if (payload.state) {
         state.graph = payload.state;
@@ -1189,6 +1209,7 @@ function connectStream() {
 async function postCommand(path) {
     if (!state.backendAvailable) {
         if (path === "/reset") {
+            replayStop();
             state.graph = createEmptyGraph({
                 mode: "static",
                 replay_source: null,
@@ -1201,10 +1222,292 @@ async function postCommand(path) {
         }
         return;
     }
+    replayStop();
     await fetch(path, { method: "POST" });
 }
 
+/* ═══════════════════════════════════════════════════════════ */
+/* Timed Replay Engine                                        */
+/* ═══════════════════════════════════════════════════════════ */
+
+const replay = {
+    allEvents: [], // all parsed events sorted by timestamp
+    currentIndex: 0, // how many events have been "played" so far
+    playing: false,
+    speed: 1,
+    filename: null,
+    logDetails: {},
+    // timing
+    firstTimestamp: 0, // ms of the earliest event
+    lastTimestamp: 0, // ms of the latest event
+    totalDuration: 0, // ms span
+    simTimeMs: 0, // current simulation time offset from first event
+    wallAnchor: 0, // performance.now() when we last started/resumed
+    simAnchorMs: 0, // simTimeMs at the moment we started/resumed
+    rafId: null,
+    active: false, // true when a log is loaded for replay
+};
+
+function replayFormatTime(date) {
+    const h = String(date.getHours()).padStart(2, "0");
+    const m = String(date.getMinutes()).padStart(2, "0");
+    const s = String(date.getSeconds()).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+}
+
+function replayFormatDuration(ms) {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    if (totalSec < 60) return `${totalSec}s`;
+    const minutes = Math.floor(totalSec / 60);
+    const seconds = totalSec % 60;
+    if (minutes < 60) return `${minutes}m ${seconds}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainMin = minutes % 60;
+    return `${hours}h ${remainMin}m`;
+}
+
+function replayBuildAndRender() {
+    const eventsToPlay = replay.allEvents.slice(0, replay.currentIndex);
+    state.graph = buildGraphFromEvents(eventsToPlay, replay.logDetails);
+    state.selectedId = state.selectedId || ROOT_AGENT_ID;
+    render();
+}
+
+function replayUpdateUI() {
+    const total = replay.allEvents.length;
+    const idx = replay.currentIndex;
+
+    // Event counter
+    els.replayEvtCurrent.textContent = String(idx);
+    els.replayEvtTotal.textContent = String(total);
+
+    // Scrubber
+    els.replayScrubber.max = String(total);
+    els.replayScrubber.value = String(idx);
+    const pct = total > 0 ? (idx / total) * 100 : 0;
+    els.replayScrubber.style.setProperty("--progress", `${pct}%`);
+
+    // Simulation clock
+    const simDate = new Date(replay.firstTimestamp + replay.simTimeMs);
+    els.replayClockTime.textContent = replayFormatTime(simDate);
+
+    // Elapsed / total
+    const elapsedStr = replayFormatDuration(replay.simTimeMs);
+    const totalStr = replayFormatDuration(replay.totalDuration);
+    els.replayElapsed.textContent = `${elapsedStr} / ${totalStr}`;
+
+    // Play button icon
+    const isPlay = !replay.playing;
+    els.replayPlay.classList.toggle("is-playing", replay.playing);
+    els.replayPlayIcon.innerHTML = isPlay
+        ? '<polygon points="5,3 15,9 5,15"/>'
+        : '<rect x="4" y="3" width="3.5" height="12" rx="1"/><rect x="10.5" y="3" width="3.5" height="12" rx="1"/>';
+}
+
+function replayAdvanceTo(targetSimMs) {
+    replay.simTimeMs = Math.min(targetSimMs, replay.totalDuration);
+    // Advance currentIndex to include all events at or before simTimeMs
+    while (replay.currentIndex < replay.allEvents.length) {
+        const evt = replay.allEvents[replay.currentIndex];
+        const evtOffset =
+            parseDate(evt.timestamp).getTime() - replay.firstTimestamp;
+        if (evtOffset <= replay.simTimeMs) {
+            replay.currentIndex++;
+        } else {
+            break;
+        }
+    }
+}
+
+function replayTick() {
+    if (!replay.playing) return;
+    const now = performance.now();
+    const wallElapsed = now - replay.wallAnchor;
+    const simElapsed = wallElapsed * replay.speed;
+    const targetSimMs = replay.simAnchorMs + simElapsed;
+
+    const prevIndex = replay.currentIndex;
+    replayAdvanceTo(targetSimMs);
+
+    if (replay.currentIndex !== prevIndex) {
+        replayBuildAndRender();
+    }
+    replayUpdateUI();
+
+    if (replay.simTimeMs >= replay.totalDuration) {
+        // Reached the end
+        replay.playing = false;
+        replay.simTimeMs = replay.totalDuration;
+        replay.currentIndex = replay.allEvents.length;
+        replayBuildAndRender();
+        replayUpdateUI();
+        return;
+    }
+    replay.rafId = requestAnimationFrame(replayTick);
+}
+
+function replayStart() {
+    if (!replay.active || replay.allEvents.length === 0) return;
+    // If at end, rewind first
+    if (replay.currentIndex >= replay.allEvents.length) {
+        replaySeekTo(0);
+    }
+    replay.playing = true;
+    replay.wallAnchor = performance.now();
+    replay.simAnchorMs = replay.simTimeMs;
+    replay.rafId = requestAnimationFrame(replayTick);
+    replayUpdateUI();
+}
+
+function replayPause() {
+    replay.playing = false;
+    if (replay.rafId) {
+        cancelAnimationFrame(replay.rafId);
+        replay.rafId = null;
+    }
+    replayUpdateUI();
+}
+
+function replayToggle() {
+    if (replay.playing) {
+        replayPause();
+    } else {
+        replayStart();
+    }
+}
+
+function replaySeekTo(index) {
+    const wasPlaying = replay.playing;
+    replayPause();
+    replay.currentIndex = clamp(index, 0, replay.allEvents.length);
+    if (replay.currentIndex === 0) {
+        replay.simTimeMs = 0;
+    } else if (replay.currentIndex >= replay.allEvents.length) {
+        replay.simTimeMs = replay.totalDuration;
+    } else {
+        const evt = replay.allEvents[replay.currentIndex - 1];
+        replay.simTimeMs =
+            parseDate(evt.timestamp).getTime() - replay.firstTimestamp;
+    }
+    replayBuildAndRender();
+    replayUpdateUI();
+    if (wasPlaying) {
+        replayStart();
+    }
+}
+
+function replayRewind() {
+    replayPause();
+    replaySeekTo(0);
+}
+
+function replayStepForward() {
+    replayPause();
+    if (replay.currentIndex < replay.allEvents.length) {
+        replay.currentIndex++;
+        if (replay.currentIndex > 0) {
+            const evt = replay.allEvents[replay.currentIndex - 1];
+            replay.simTimeMs =
+                parseDate(evt.timestamp).getTime() - replay.firstTimestamp;
+        }
+        replayBuildAndRender();
+        replayUpdateUI();
+    }
+}
+
+function replaySetSpeed(speed) {
+    const wasPlaying = replay.playing;
+    if (wasPlaying) replayPause();
+    replay.speed = speed;
+    if (wasPlaying) replayStart();
+}
+
+function replayStop() {
+    replayPause();
+    replay.active = false;
+    replay.allEvents = [];
+    replay.currentIndex = 0;
+    replay.simTimeMs = 0;
+    replay.totalDuration = 0;
+    els.replayPlayer.classList.remove("active");
+}
+
+function replayLoadEvents(events, filename) {
+    replayStop();
+
+    // Sort events by timestamp
+    const sorted = events.slice().sort((a, b) => {
+        return (
+            parseDate(a.timestamp).getTime() - parseDate(b.timestamp).getTime()
+        );
+    });
+
+    replay.allEvents = sorted;
+    replay.filename = filename;
+    replay.logDetails = {
+        mode: "replay",
+        replay_source: filename || "uploaded log",
+        current_path: null,
+        file_name: filename || null,
+    };
+
+    const first = parseDate(sorted[0].timestamp).getTime();
+    const last = parseDate(sorted[sorted.length - 1].timestamp).getTime();
+    replay.firstTimestamp = first;
+    replay.lastTimestamp = last;
+    replay.totalDuration = Math.max(0, last - first);
+    replay.currentIndex = 0;
+    replay.simTimeMs = 0;
+    replay.active = true;
+
+    els.replayPlayer.classList.add("active");
+    els.replayScrubber.max = String(sorted.length);
+    els.replayScrubber.value = "0";
+    els.replaySpeed.value = "1";
+    replay.speed = 1;
+
+    // Show empty graph initially
+    state.graph = createEmptyGraph(replay.logDetails);
+    state.selectedId = ROOT_AGENT_ID;
+    userHasInteracted = false;
+    setConnection(false);
+    render();
+    replayUpdateUI();
+}
+
+// Wire up replay player controls
+els.replayPlay.addEventListener("click", replayToggle);
+els.replayRewind.addEventListener("click", replayRewind);
+els.replayStep.addEventListener("click", replayStepForward);
+els.replaySpeed.addEventListener("change", (e) => {
+    replaySetSpeed(parseFloat(e.target.value) || 1);
+});
+els.replayScrubber.addEventListener("input", (e) => {
+    const idx = parseInt(e.target.value, 10);
+    replaySeekTo(idx);
+});
+// Keyboard shortcut: Space to toggle play when replay is active
+document.addEventListener("keydown", (e) => {
+    if (!replay.active) return;
+    if (
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.tagName === "SELECT"
+    )
+        return;
+    if (e.code === "Space") {
+        e.preventDefault();
+        replayToggle();
+    }
+});
+
 async function replayLogContent(content, filename) {
+    const entries = parseLogEntries(content);
+    const events = extractEventsFromEntries(entries);
+    if (!events.length) {
+        throw new Error("No workflow events were found in the supplied log.");
+    }
+
     if (state.backendAvailable) {
         const response = await fetch("/replay-log", {
             method: "POST",
@@ -1212,29 +1515,12 @@ async function replayLogContent(content, filename) {
             body: JSON.stringify({ content, filename }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (response.ok) {
-            state.graph = payload.state || state.graph;
-            userHasInteracted = false;
-            render();
-            return;
+        if (!response.ok) {
+            throw new Error(payload.detail || "Replay failed.");
         }
     }
 
-    const entries = parseLogEntries(content);
-    const events = extractEventsFromEntries(entries);
-    if (!events.length) {
-        throw new Error("No workflow events were found in the supplied log.");
-    }
-    state.graph = buildGraphFromEvents(events, {
-        mode: "replay",
-        replay_source: filename || "uploaded log",
-        current_path: filename || null,
-        file_name: filename || null,
-    });
-    state.selectedId = ROOT_AGENT_ID;
-    userHasInteracted = false;
-    setConnection(false);
-    render();
+    replayLoadEvents(events, filename);
 }
 
 async function replayFile(file) {

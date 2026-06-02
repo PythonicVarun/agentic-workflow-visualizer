@@ -232,12 +232,13 @@ class GraphState:
         prompt = (
             event.data.get("prompt") or event.data.get("input") or "Prompt received"
         )
-        self._touch(
+        node = self._touch(
             event,
             action=f"User prompt: {summarize(prompt, 110)}",
             role="primary",
             label=event.data.get("label") or "Primary Agent",
         )
+        node.spawn_prompt = prompt
 
     def _handle_agent_output(self, event: WorkflowEvent) -> None:
         output = event.data.get("output") or event.data.get("message") or "Responded"

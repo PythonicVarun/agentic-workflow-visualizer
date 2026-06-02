@@ -8,17 +8,7 @@
             rel="icon"
             href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M8 16h16M16 8v16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
         />
-        <link id="app-stylesheet" rel="stylesheet" href="./style.css" />
-        <script>
-            const appStylesheet = document.getElementById("app-stylesheet");
-            appStylesheet.addEventListener(
-                "error",
-                () => {
-                    appStylesheet.href = "/static/style.css";
-                },
-                { once: true },
-            );
-        </script>
+        <link id="app-stylesheet" rel="stylesheet" href="/static/style.css" />
     </head>
     <body>
         <div class="app-shell">
@@ -214,6 +204,142 @@
                             accept=".jsonl,.ndjson,.json,application/json,text/plain"
                             hidden
                         />
+
+                        <!-- Replay Player Controls -->
+                        <div class="replay-player" id="replay-player">
+                            <div class="replay-clock-row">
+                                <div class="replay-sim-clock">
+                                    <svg
+                                        class="clock-icon"
+                                        viewBox="0 0 16 16"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.5"
+                                        stroke-linecap="round"
+                                    >
+                                        <circle cx="8" cy="8" r="6.5" />
+                                        <polyline points="8,4 8,8 11,10" />
+                                    </svg>
+                                    <span class="clock-label">Sim</span>
+                                    <span
+                                        class="clock-time"
+                                        id="replay-clock-time"
+                                        >--:--:--</span
+                                    >
+                                </div>
+                                <div class="replay-event-counter">
+                                    <span
+                                        class="counter-current"
+                                        id="replay-evt-current"
+                                        >0</span
+                                    >
+                                    <span class="counter-sep">/</span>
+                                    <span
+                                        class="counter-total"
+                                        id="replay-evt-total"
+                                        >0</span
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="replay-progress-row">
+                                <div class="replay-progress-track">
+                                    <input
+                                        type="range"
+                                        id="replay-scrubber"
+                                        min="0"
+                                        max="100"
+                                        value="0"
+                                        step="1"
+                                        aria-label="Replay progress"
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="replay-controls-row">
+                                <div class="replay-transport">
+                                    <button
+                                        id="replay-rewind"
+                                        type="button"
+                                        title="Rewind to start"
+                                        aria-label="Rewind"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                        >
+                                            <rect
+                                                x="2"
+                                                y="4"
+                                                width="2.5"
+                                                height="10"
+                                                rx="0.8"
+                                            />
+                                            <polygon points="14,4 7,9 14,14" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        id="replay-play"
+                                        type="button"
+                                        title="Play / Pause"
+                                        aria-label="Play or Pause"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                            id="replay-play-icon"
+                                        >
+                                            <polygon points="5,3 15,9 5,15" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        id="replay-step"
+                                        type="button"
+                                        title="Step forward one event"
+                                        aria-label="Step forward"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                        >
+                                            <polygon points="4,4 11,9 4,14" />
+                                            <rect
+                                                x="12.5"
+                                                y="4"
+                                                width="2.5"
+                                                height="10"
+                                                rx="0.8"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="replay-speed-control">
+                                    <span class="speed-label">Speed</span>
+                                    <select
+                                        id="replay-speed"
+                                        class="replay-speed-select"
+                                        aria-label="Replay speed"
+                                    >
+                                        <option value="0.25">0.25×</option>
+                                        <option value="0.5">0.5×</option>
+                                        <option value="1" selected>1×</option>
+                                        <option value="2">2×</option>
+                                        <option value="4">4×</option>
+                                        <option value="8">8×</option>
+                                        <option value="10">10×</option>
+                                    </select>
+                                </div>
+                                <span class="replay-elapsed" id="replay-elapsed"
+                                    >0s / 0s</span
+                                >
+                            </div>
+                        </div>
                     </section>
 
                     <div
@@ -234,21 +360,6 @@
                 </aside>
             </main>
         </div>
-        <script type="module">
-            const scriptCandidates = ["./graph.js", "/static/graph.js"];
-            let loaded = false;
-            for (const url of scriptCandidates) {
-                try {
-                    await import(url);
-                    loaded = true;
-                    break;
-                } catch (error) {
-                    console.debug("Visualizer script load failed", url, error);
-                }
-            }
-            if (!loaded) {
-                console.error("Unable to load graph.js");
-            }
-        </script>
+        <script type="module" src="/static/graph.js"></script>
     </body>
 </html>

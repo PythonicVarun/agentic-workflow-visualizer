@@ -21,37 +21,23 @@ class EventLogStore:
         self._dir = root / ".awv-logs"
         self._lock = RLock()
         self._current_path: Path | None = None
-        self.rotate(reason="startup")
+        self._pending_reason = "startup"
 
     @property
-    def current_path(self) -> Path:
-        if self._current_path is None:
-            self.rotate(reason="startup")
+    def current_path(self) -> Path | None:
         return self._current_path
 
     def snapshot(self) -> dict[str, Any]:
         path = self.current_path
         return {
-            "current_path": str(path),
-            "file_name": path.name,
+            "current_path": str(path) if path else None,
+            "file_name": path.name if path else None,
         }
 
-    def rotate(self, *, reason: str) -> Path:
+    def rotate(self, *, reason: str) -> None:
         with self._lock:
-            self._dir.mkdir(parents=True, exist_ok=True)
-            created_at = _utc_now()
-            filename = created_at.strftime("workflow-%Y%m%d-%H%M%S-%f.jsonl")
-            path = self._dir / filename
-            self._current_path = path
-            self._append_locked(
-                {
-                    "kind": "meta",
-                    "version": LOG_VERSION,
-                    "reason": reason,
-                    "created_at": created_at.isoformat(),
-                }
-            )
-            return path
+            self._current_path = None
+            self._pending_reason = reason
 
     def append_workflow_event(
         self, event: WorkflowEvent, *, source: str = "event"
@@ -83,7 +69,33 @@ class EventLogStore:
             self._append_locked(entry)
 
     def _append_locked(self, entry: dict[str, Any]) -> None:
-        path = self.current_path
+        path = self._ensure_current_path_locked()
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=True, default=str))
+            handle.write("\n")
+
+    def _ensure_current_path_locked(self) -> Path:
+        path = self._current_path
+        if path is not None:
+            return path
+
+        self._dir.mkdir(parents=True, exist_ok=True)
+        created_at = _utc_now()
+        filename = created_at.strftime("workflow-%Y%m%d-%H%M%S-%f.jsonl")
+        path = self._dir / filename
+        self._current_path = path
+        self._write_entry_locked(
+            path,
+            {
+                "kind": "meta",
+                "version": LOG_VERSION,
+                "reason": self._pending_reason,
+                "created_at": created_at.isoformat(),
+            },
+        )
+        return path
+
+    def _write_entry_locked(self, path: Path, entry: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=True, default=str))
             handle.write("\n")
