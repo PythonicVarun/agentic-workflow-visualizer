@@ -16,6 +16,14 @@ const state = {
     backendAvailable: false,
 };
 
+const sessionLibrary = {
+    loaded: false,
+    selectedSessionId: null,
+    sessions: [],
+    sessionMap: new Map(),
+    childMap: new Map(),
+};
+
 const els = {
     svg: document.querySelector("#graph"),
     empty: document.querySelector("#empty-state"),
@@ -31,6 +39,9 @@ const els = {
     logPath: document.querySelector("#log-path"),
     replayDropzone: document.querySelector("#replay-dropzone"),
     replayFile: document.querySelector("#replay-file"),
+    replayFolder: document.querySelector("#replay-folder"),
+    pickLogFiles: document.querySelector("#pick-log-files"),
+    pickLogFolder: document.querySelector("#pick-log-folder"),
     feed: document.querySelector("#event-feed"),
     selectedTitle: document.querySelector("#selected-title"),
     selectedStatus: document.querySelector("#selected-status"),
@@ -60,12 +71,12 @@ const els = {
     replaySpeed: document.querySelector("#replay-speed"),
     replayElapsed: document.querySelector("#replay-elapsed"),
 
-    // Demo logs elements
-    demoLogsSection: document.querySelector("#demo-logs-section"),
-    demoLogsToggle: document.querySelector("#demo-logs-toggle"),
-    demoLogsCount: document.querySelector("#demo-logs-count"),
-    demoLogsList: document.querySelector("#demo-logs-list"),
-    demoLogsEmpty: document.querySelector("#demo-logs-empty"),
+    // Session library elements
+    sessionLibrarySection: document.querySelector("#session-library-section"),
+    sessionLibraryToggle: document.querySelector("#session-library-toggle"),
+    sessionLibraryCount: document.querySelector("#session-library-count"),
+    sessionLibraryList: document.querySelector("#session-library-list"),
+    sessionLibraryEmpty: document.querySelector("#session-library-empty"),
 };
 
 const zoomPan = {
@@ -386,6 +397,72 @@ function basename(path) {
     return value.split(/[\\/]/).pop() || value;
 }
 
+function safeJsonParse(value) {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (!text) return null;
+    if (!/^[\[{]/.test(text)) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
+
+function contentText(content) {
+    if (!Array.isArray(content)) return "";
+    return content
+        .map((item) => item?.text || item?.value || item?.input || "")
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+}
+
+function parseToolPayload(rawValue) {
+    if (rawValue && typeof rawValue === "object") return rawValue;
+    const parsed = safeJsonParse(rawValue);
+    return parsed ?? rawValue;
+}
+
+function normalizeCodexThreadSource(meta = {}) {
+    if (meta.thread_source) return meta.thread_source;
+    if (meta.source && typeof meta.source === "object" && meta.source.subagent) {
+        return "subagent";
+    }
+    if (meta.source === "exec") return "subagent";
+    return "user";
+}
+
+function stripCodexSystemBlocks(text) {
+    return String(text || "")
+        .replace(/<environment_context>[\s\S]*?<\/environment_context>/gi, " ")
+        .replace(/<subagent_notification>[\s\S]*?<\/subagent_notification>/gi, " ")
+        .replace(/# AGENTS\.md instructions[\s\S]*?<\/INSTRUCTIONS>/gi, " ")
+        .replace(/<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizeCodexPrompt(text) {
+    const cleaned = stripCodexSystemBlocks(text);
+    const promptMatch = cleaned.match(/User prompt:\s*([\s\S]+)/i);
+    return promptMatch ? promptMatch[1].trim() : cleaned;
+}
+
+function fileDisplayPath(file) {
+    return file?.webkitRelativePath || file?.name || "selected log";
+}
+
+function formatDateTime(value) {
+    const date = parseDate(value);
+    return date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
 function parseDate(value) {
     const date = value ? new Date(value) : new Date();
     return Number.isNaN(date.getTime()) ? new Date() : date;
@@ -604,10 +681,11 @@ function buildGraphFromEvents(events, logDetails = {}) {
             }
             case "user_input": {
                 const prompt = data.prompt || data.input || "Prompt received";
+                const isPrimaryAgent = event.agent_id === ROOT_AGENT_ID;
                 const node = touch(event, {
                     action: `User prompt: ${summarize(prompt, 110)}`,
-                    role: "primary",
-                    label: data.label || "Primary Agent",
+                    role: data.role || (isPrimaryAgent ? "primary" : "agent"),
+                    label: data.label || (isPrimaryAgent ? "Primary Agent" : null),
                 });
                 node.spawn_prompt = prompt;
                 break;
@@ -808,6 +886,488 @@ function extractEventsFromEntries(entries) {
         }
     }
     return events;
+}
+
+function getCodexSessionMeta(entries) {
+    const metaEntry = entries.find(
+        (entry) =>
+            entry?.type === "session_meta" &&
+            entry.payload &&
+            typeof entry.payload === "object",
+    );
+    return metaEntry?.payload || null;
+}
+
+function deriveCodexSessionTitle(entries, meta, fallbackName) {
+    for (const entry of entries) {
+        if (entry?.type !== "event_msg" || entry?.payload?.type !== "user_message") {
+            continue;
+        }
+        const prompt = normalizeCodexPrompt(entry.payload.message);
+        if (prompt) return trim(prompt, 58);
+    }
+    if (meta?.agent_nickname) {
+        return `${humanize(meta.agent_nickname)} session`;
+    }
+    return basename(fallbackName || meta?.id || "codex-session");
+}
+
+function buildCodexSessionDescriptor(file, entries) {
+    const meta = getCodexSessionMeta(entries);
+    if (!meta?.id) return null;
+    const threadSource = normalizeCodexThreadSource(meta);
+    const timestamps = entries
+        .map((entry) => parseDate(entry?.timestamp).getTime())
+        .filter((value) => Number.isFinite(value));
+    const startedAt = meta.timestamp || entries[0]?.timestamp || isoNow();
+    const updatedAt = timestamps.length
+        ? new Date(Math.max(...timestamps)).toISOString()
+        : startedAt;
+    const parentSessionId =
+        meta.forked_from_id ||
+        meta.source?.subagent?.thread_spawn?.parent_thread_id ||
+        null;
+    return {
+        id: meta.id,
+        meta,
+        entries,
+        file,
+        fileName: file.name,
+        filePath: fileDisplayPath(file),
+        threadSource,
+        parentSessionId,
+        nickname:
+            meta.agent_nickname ||
+            meta.source?.subagent?.thread_spawn?.agent_nickname ||
+            null,
+        role:
+            meta.agent_role ||
+            meta.source?.subagent?.thread_spawn?.agent_role ||
+            (threadSource === "subagent" ? "subagent" : "primary"),
+        cwd: meta.cwd || null,
+        startedAt,
+        updatedAt,
+        title: deriveCodexSessionTitle(entries, meta, file.name),
+    };
+}
+
+function rebuildSessionLibrary(descriptors) {
+    sessionLibrary.loaded = true;
+    sessionLibrary.selectedSessionId = null;
+    sessionLibrary.sessions = descriptors
+        .slice()
+        .sort(
+            (a, b) =>
+                parseDate(b.updatedAt).getTime() - parseDate(a.updatedAt).getTime(),
+        );
+    sessionLibrary.sessionMap = new Map(
+        sessionLibrary.sessions.map((session) => [session.id, session]),
+    );
+    sessionLibrary.childMap = new Map();
+    sessionLibrary.sessions.forEach((session) => {
+        if (!session.parentSessionId) return;
+        const existing = sessionLibrary.childMap.get(session.parentSessionId) || [];
+        existing.push(session.id);
+        sessionLibrary.childMap.set(session.parentSessionId, existing);
+    });
+}
+
+function primarySessions() {
+    return sessionLibrary.sessions.filter(
+        (session) => session.threadSource !== "subagent",
+    );
+}
+
+function spawnedSubagentCount(sessionId) {
+    return (sessionLibrary.childMap.get(sessionId) || []).length;
+}
+
+function descendantSessionIds(sessionId) {
+    const results = [];
+    const stack = [...(sessionLibrary.childMap.get(sessionId) || [])];
+    while (stack.length) {
+        const childId = stack.pop();
+        results.push(childId);
+        const next = sessionLibrary.childMap.get(childId) || [];
+        stack.push(...next);
+    }
+    return results;
+}
+
+function renderSessionLibrary() {
+    const list = els.sessionLibraryList;
+    const empty = els.sessionLibraryEmpty;
+    const count = els.sessionLibraryCount;
+    const sessions = primarySessions();
+
+    count.textContent = String(sessions.length);
+
+    if (!sessionLibrary.loaded) {
+        list.innerHTML = "";
+        list.style.display = "none";
+        empty.style.display = "";
+        empty.textContent =
+            "Load one or more Codex session logs to list the primary sessions.";
+        return;
+    }
+
+    if (!sessions.length) {
+        list.innerHTML = "";
+        list.style.display = "none";
+        empty.style.display = "";
+        empty.textContent =
+            "No primary Codex sessions were found in the selected files.";
+        return;
+    }
+
+    empty.style.display = "none";
+    list.style.display = "";
+    list.innerHTML = "";
+
+    sessions.forEach((session) => {
+        const li = document.createElement("li");
+        const spawnedCount = spawnedSubagentCount(session.id);
+        li.className = `demo-log-card session-log-card${sessionLibrary.selectedSessionId === session.id ? " is-selected" : ""}`;
+        li.dataset.sessionId = session.id;
+        li.setAttribute("role", "button");
+        li.setAttribute("tabindex", "0");
+
+        const header = document.createElement("div");
+        header.className = "demo-log-header session-log-header";
+
+        const playIcon = document.createElement("span");
+        playIcon.className = "demo-log-play-icon";
+        playIcon.innerHTML =
+            '<svg viewBox="0 0 14 14" width="12" height="12" fill="currentColor"><polygon points="4,2 12,7 4,12"/></svg>';
+
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "session-log-title-wrap";
+
+        const title = document.createElement("span");
+        title.className = "demo-log-title";
+        title.textContent = session.title;
+
+        const path = document.createElement("span");
+        path.className = "session-log-path";
+        path.textContent = session.filePath;
+
+        titleWrap.append(title, path);
+        header.append(playIcon, titleWrap);
+        li.appendChild(header);
+
+        const description = document.createElement("p");
+        description.className = "session-log-description";
+        description.textContent = session.cwd || "Codex session log";
+        li.appendChild(description);
+
+        const meta = document.createElement("div");
+        meta.className = "demo-log-meta session-log-meta";
+
+        const updated = document.createElement("span");
+        updated.className = "demo-log-pill";
+        updated.textContent = formatDateTime(session.updatedAt);
+        meta.appendChild(updated);
+
+        const childPill = document.createElement("span");
+        childPill.className = "demo-log-pill";
+        childPill.textContent = `${spawnedCount} sub-agent${spawnedCount === 1 ? "" : "s"}`;
+        meta.appendChild(childPill);
+
+        const source = document.createElement("span");
+        source.className = "demo-log-pill model-pill";
+        source.textContent =
+            typeof session.meta.source === "string"
+                ? session.meta.source
+                : session.threadSource;
+        meta.appendChild(source);
+
+        li.appendChild(meta);
+        list.appendChild(li);
+    });
+}
+
+function collectSpawnHints(sessions) {
+    const hints = new Map();
+    sessions.forEach((session) => {
+        const pendingCalls = new Map();
+        session.entries.forEach((entry) => {
+            if (entry?.type !== "response_item" || !entry.payload) return;
+            const payload = entry.payload;
+            if (
+                (payload.type === "function_call" ||
+                    payload.type === "custom_tool_call") &&
+                payload.call_id
+            ) {
+                pendingCalls.set(payload.call_id, {
+                    name: payload.name,
+                    args: parseToolPayload(payload.arguments || payload.input),
+                });
+                return;
+            }
+            if (
+                payload.call_id &&
+                (payload.type === "function_call_output" ||
+                    payload.type === "custom_tool_call_output")
+            ) {
+                const pending = pendingCalls.get(payload.call_id);
+                if (!pending || pending.name !== "spawn_agent") return;
+                const parsedOutput = parseToolPayload(payload.output);
+                const agentId = parsedOutput?.agent_id;
+                if (!agentId) return;
+                hints.set(agentId, {
+                    parentSessionId: session.id,
+                    nickname:
+                        parsedOutput.nickname ||
+                        pending.args?.agent_nickname ||
+                        null,
+                    prompt: pending.args?.message || null,
+                });
+            }
+        });
+    });
+    return hints;
+}
+
+function sessionAgentId(sessionId, rootSessionId) {
+    return sessionId === rootSessionId ? ROOT_AGENT_ID : sessionId;
+}
+
+function codexToolOutputName(payloadType, fallback) {
+    if (fallback) return fallback;
+    if (!payloadType || !payloadType.endsWith("_output")) return "tool";
+    return payloadType.replace(/_output$/, "");
+}
+
+function translateCodexSession(session, rootSessionId, spawnHints) {
+    const events = [];
+    const agentId = sessionAgentId(session.id, rootSessionId);
+    const parentId = session.parentSessionId
+        ? sessionAgentId(session.parentSessionId, rootSessionId)
+        : null;
+    const pendingCalls = new Map();
+
+    if (session.id === rootSessionId) {
+        events.push({
+            event_type: "session_start",
+            agent_id: ROOT_AGENT_ID,
+            timestamp: session.startedAt,
+            data: {
+                source: session.meta.source || session.threadSource,
+                label: "Primary Agent",
+                role: "primary",
+            },
+        });
+    } else {
+        const spawnHint = spawnHints.get(session.id);
+        events.push({
+            event_type: "subagent_spawn",
+            agent_id: agentId,
+            parent_id: parentId,
+            timestamp: session.startedAt,
+            data: {
+                name: spawnHint?.nickname || session.nickname || humanize(agentId),
+                label: spawnHint?.nickname || session.nickname || humanize(agentId),
+                prompt: spawnHint?.prompt || null,
+                role: session.role || "subagent",
+                purpose: spawnHint?.prompt || `${humanize(session.role)} task`,
+            },
+        });
+    }
+
+    session.entries.forEach((entry) => {
+        if (!entry || !entry.type) return;
+        if (entry.type === "event_msg") {
+            const payload = entry.payload || {};
+            if (payload.type === "user_message") {
+                const prompt = normalizeCodexPrompt(payload.message);
+                if (!prompt) return;
+                events.push({
+                    event_type: "user_input",
+                    agent_id: agentId,
+                    parent_id: parentId,
+                    timestamp: entry.timestamp,
+                    data: {
+                        prompt,
+                        label:
+                            agentId === ROOT_AGENT_ID
+                                ? "Primary Agent"
+                                : session.nickname || humanize(agentId),
+                        role: session.role || (agentId === ROOT_AGENT_ID ? "primary" : "subagent"),
+                    },
+                });
+                return;
+            }
+            if (payload.type === "agent_message" && payload.phase === "commentary") {
+                events.push({
+                    event_type: "agent_output",
+                    agent_id: agentId,
+                    parent_id: parentId,
+                    timestamp: entry.timestamp,
+                    data: {
+                        output: payload.message || "Updated",
+                        status: "running",
+                    },
+                });
+                return;
+            }
+            if (payload.type === "task_complete") {
+                if (agentId === ROOT_AGENT_ID) {
+                    events.push({
+                        event_type: "agent_output",
+                        agent_id: agentId,
+                        timestamp: entry.timestamp,
+                        data: {
+                            output: payload.last_agent_message || "Task complete",
+                            status: "complete",
+                        },
+                    });
+                } else {
+                    events.push({
+                        event_type: "subagent_complete",
+                        agent_id: agentId,
+                        parent_id: parentId,
+                        timestamp: entry.timestamp,
+                        data: {
+                            status: "complete",
+                            result_summary:
+                                payload.last_agent_message || "Sub-agent complete",
+                        },
+                    });
+                }
+                return;
+            }
+            if (payload.type === "task_failed") {
+                events.push({
+                    event_type: "agent_error",
+                    agent_id: agentId,
+                    parent_id: parentId,
+                    timestamp: entry.timestamp,
+                    data: {
+                        error: payload.error || payload.message || "Task failed",
+                    },
+                });
+            }
+            return;
+        }
+
+        if (entry.type !== "response_item") return;
+        const payload = entry.payload || {};
+        if (
+            (payload.type === "function_call" ||
+                payload.type === "custom_tool_call") &&
+            payload.call_id
+        ) {
+            const parsedArgs = parseToolPayload(payload.arguments || payload.input);
+            pendingCalls.set(payload.call_id, {
+                name: payload.name || "tool",
+                args: parsedArgs,
+            });
+            events.push({
+                event_type: "tool_call",
+                agent_id: agentId,
+                parent_id: parentId,
+                timestamp: entry.timestamp,
+                data: {
+                    tool_name: payload.name || "tool",
+                    args: parsedArgs,
+                },
+            });
+            return;
+        }
+
+        if (
+            payload.call_id &&
+            (payload.type === "function_call_output" ||
+                payload.type === "custom_tool_call_output" ||
+                payload.type === "tool_search_output")
+        ) {
+            const pending = pendingCalls.get(payload.call_id);
+            const output = parseToolPayload(payload.output);
+            const toolName = codexToolOutputName(payload.type, pending?.name);
+            const data = {
+                tool_name: toolName,
+                output,
+            };
+            if (toolName === "spawn_agent" && output?.agent_id) {
+                data.spawned_agent_id = output.agent_id;
+                data.spawned_agent_label =
+                    output.nickname || pending?.args?.agent_nickname || null;
+                data.spawn_prompt = pending?.args?.message || null;
+            }
+            events.push({
+                event_type: "tool_output",
+                agent_id: agentId,
+                parent_id: parentId,
+                timestamp: entry.timestamp,
+                data,
+            });
+        }
+    });
+
+    return events;
+}
+
+function replayCodexSession(sessionId) {
+    const root = sessionLibrary.sessionMap.get(sessionId);
+    if (!root) return;
+    const sessionIds = [sessionId, ...descendantSessionIds(sessionId)];
+    const sessions = sessionIds
+        .map((id) => sessionLibrary.sessionMap.get(id))
+        .filter(Boolean)
+        .sort(
+            (a, b) =>
+                parseDate(a.startedAt).getTime() - parseDate(b.startedAt).getTime(),
+        );
+    const spawnHints = collectSpawnHints(sessions);
+    const events = sessions.flatMap((session) =>
+        translateCodexSession(session, sessionId, spawnHints),
+    );
+    if (!events.length) {
+        throw new Error("No replayable events were found in the selected session.");
+    }
+    sessionLibrary.selectedSessionId = sessionId;
+    renderSessionLibrary();
+    replayLoadEvents(
+        events,
+        root.title,
+        {
+            mode: "replay",
+            replay_source: root.title,
+            current_path: root.filePath,
+            file_name: root.fileName,
+        },
+    );
+}
+
+async function handleReplaySelection(fileList) {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+
+    const parsedFiles = await Promise.all(
+        files.map(async (file) => {
+            const text = await file.text();
+            return {
+                file,
+                text,
+                entries: parseLogEntries(text),
+            };
+        }),
+    );
+
+    const codexSessions = parsedFiles
+        .map(({ file, entries }) => buildCodexSessionDescriptor(file, entries))
+        .filter(Boolean);
+
+    if (codexSessions.length) {
+        rebuildSessionLibrary(codexSessions);
+        renderSessionLibrary();
+        const firstSession = primarySessions()[0];
+        if (firstSession) replayCodexSession(firstSession.id);
+        return;
+    }
+
+    const [{ text, file }] = parsedFiles;
+    await replayLogContent(text, file.name);
 }
 
 function buildLayout(nodes, edges) {
@@ -1440,7 +2000,7 @@ function replayStop() {
     els.replayPlayer.classList.remove("active");
 }
 
-function replayLoadEvents(events, filename) {
+function replayLoadEvents(events, filename, logDetails = {}) {
     replayStop();
 
     // Sort events by timestamp
@@ -1457,6 +2017,7 @@ function replayLoadEvents(events, filename) {
         replay_source: filename || "uploaded log",
         current_path: null,
         file_name: filename || null,
+        ...logDetails,
     };
 
     const first = parseDate(sorted[0].timestamp).getTime();
@@ -1531,21 +2092,29 @@ async function replayLogContent(content, filename) {
     replayLoadEvents(events, filename);
 }
 
-async function replayFile(file) {
-    if (!file) return;
-    const text = await file.text();
-    await replayLogContent(text, file.name);
-}
-
 els.demoButton.addEventListener("click", () => postCommand("/demo"));
 els.resetButton.addEventListener("click", () => postCommand("/reset"));
-els.replayFile.addEventListener("change", async (event) => {
-    const [file] = event.target.files || [];
-    if (!file) return;
+els.pickLogFiles.addEventListener("click", () => els.replayFile.click());
+els.pickLogFolder.addEventListener("click", () => els.replayFolder.click());
+
+async function handleSelectedFiles(fileList) {
     try {
-        await replayFile(file);
+        await handleReplaySelection(fileList);
     } catch (error) {
         window.alert(error instanceof Error ? error.message : "Replay failed.");
+    }
+}
+
+els.replayFile.addEventListener("change", async (event) => {
+    try {
+        await handleSelectedFiles(event.target.files || []);
+    } finally {
+        event.target.value = "";
+    }
+});
+els.replayFolder.addEventListener("change", async (event) => {
+    try {
+        await handleSelectedFiles(event.target.files || []);
     } finally {
         event.target.value = "";
     }
@@ -1564,13 +2133,7 @@ els.replayFile.addEventListener("change", async (event) => {
 els.replayDropzone.addEventListener("drop", async (event) => {
     event.preventDefault();
     els.replayDropzone.classList.remove("dragover");
-    const [file] = Array.from(event.dataTransfer?.files || []);
-    if (!file) return;
-    try {
-        await replayFile(file);
-    } catch (error) {
-        window.alert(error instanceof Error ? error.message : "Replay failed.");
-    }
+    await handleSelectedFiles(Array.from(event.dataTransfer?.files || []));
 });
 els.svg.addEventListener("click", (e) => {
     if (!e.target.closest(".node")) {
@@ -1588,10 +2151,153 @@ function setupResizers() {
     const inspector = document.querySelector(".inspector");
     const nodePanel = document.querySelector(".node-panel");
     const replayPanel = document.querySelector(".replay-panel");
+    const feedPanel = document.querySelector(".feed-panel");
     const inspectorResizer1 = document.getElementById("inspector-resizer-1");
     const inspectorResizer2 = document.getElementById("inspector-resizer-2");
 
     if (!workspace || !workspaceResizer || !inspector) return;
+
+    const MIN_NODE_HEIGHT = 100;
+    const MIN_REPLAY_HEIGHT = 120;
+    const MIN_FEED_HEIGHT = 140;
+    const COLLAPSED_PANEL_HEIGHT = 56;
+    const RESIZER_SPACE = 28;
+    const panelConfigs = [
+        {
+            key: "node",
+            panel: nodePanel,
+            storageKey: "awv-panel-node-collapsed",
+        },
+        {
+            key: "replay",
+            panel: replayPanel,
+            storageKey: "awv-panel-replay-collapsed",
+        },
+        {
+            key: "feed",
+            panel: feedPanel,
+            storageKey: "awv-panel-feed-collapsed",
+        },
+    ].filter((item) => item.panel);
+
+    function isCollapsed(panel) {
+        return panel?.classList.contains("is-collapsed");
+    }
+
+    function setPanelCollapsed(panel, collapsed) {
+        if (!panel) return;
+        panel.classList.toggle("is-collapsed", collapsed);
+        const toggle = panel.querySelector(".panel-toggle");
+        if (toggle) {
+            toggle.setAttribute("aria-expanded", String(!collapsed));
+        }
+    }
+
+    function updateInspectorResizers() {
+        const disableTop = isCollapsed(nodePanel) || isCollapsed(replayPanel);
+        const disableBottom = isCollapsed(replayPanel) || isCollapsed(feedPanel);
+
+        if (inspectorResizer1) {
+            inspectorResizer1.style.opacity = disableTop ? "0.35" : "";
+            inspectorResizer1.style.pointerEvents = disableTop ? "none" : "";
+        }
+        if (inspectorResizer2) {
+            inspectorResizer2.style.opacity = disableBottom ? "0.35" : "";
+            inspectorResizer2.style.pointerEvents = disableBottom ? "none" : "";
+        }
+    }
+
+    function applyInspectorHeights(nodeHeight, replayHeight) {
+        const inspectorHeight = inspector.getBoundingClientRect().height;
+        if (!inspectorHeight) return;
+
+        const nodeCollapsed = isCollapsed(nodePanel);
+        const replayCollapsed = isCollapsed(replayPanel);
+        const feedCollapsed = isCollapsed(feedPanel);
+
+        let nextNodeHeight = nodeCollapsed
+            ? COLLAPSED_PANEL_HEIGHT
+            : Math.max(MIN_NODE_HEIGHT, Number.parseFloat(nodeHeight) || 0);
+        let nextReplayHeight = replayCollapsed
+            ? COLLAPSED_PANEL_HEIGHT
+            : Math.max(MIN_REPLAY_HEIGHT, Number.parseFloat(replayHeight) || 0);
+        const minFeedHeight = feedCollapsed
+            ? COLLAPSED_PANEL_HEIGHT
+            : MIN_FEED_HEIGHT;
+        const availableHeight = inspectorHeight - RESIZER_SPACE;
+
+        if (nextNodeHeight + nextReplayHeight > availableHeight - minFeedHeight) {
+            const overflow =
+                nextNodeHeight + nextReplayHeight - (availableHeight - minFeedHeight);
+            const nodeSlack = nodeCollapsed
+                ? 0
+                : Math.max(0, nextNodeHeight - MIN_NODE_HEIGHT);
+            const replaySlack = replayCollapsed
+                ? 0
+                : Math.max(0, nextReplayHeight - MIN_REPLAY_HEIGHT);
+            const totalSlack = nodeSlack + replaySlack;
+
+            if (totalSlack > 0) {
+                const nodeCut = Math.min(
+                    nodeSlack,
+                    Math.round((overflow * nodeSlack) / totalSlack),
+                );
+                nextNodeHeight -= nodeCut;
+                nextReplayHeight -= Math.min(
+                    replaySlack,
+                    overflow - nodeCut,
+                );
+            }
+        }
+
+        const feedHeight =
+            inspectorHeight - RESIZER_SPACE - nextNodeHeight - nextReplayHeight;
+
+        if (feedHeight < minFeedHeight) {
+            const deficit = minFeedHeight - feedHeight;
+            const replayCut = Math.min(
+                replayCollapsed
+                    ? 0
+                    : Math.max(0, nextReplayHeight - MIN_REPLAY_HEIGHT),
+                deficit,
+            );
+            nextReplayHeight -= replayCut;
+            nextNodeHeight -= Math.min(
+                nodeCollapsed ? 0 : Math.max(0, nextNodeHeight - MIN_NODE_HEIGHT),
+                deficit - replayCut,
+            );
+        }
+
+        inspector.style.gridTemplateRows = `${nextNodeHeight}px 14px ${nextReplayHeight}px 14px ${
+            feedCollapsed
+                ? `${COLLAPSED_PANEL_HEIGHT}px`
+                : `minmax(${MIN_FEED_HEIGHT}px, 1fr)`
+        }`;
+        if (!nodeCollapsed) {
+            localStorage.setItem("awv-node-height", String(nextNodeHeight));
+        }
+        if (!replayCollapsed) {
+            localStorage.setItem("awv-replay-height", String(nextReplayHeight));
+        }
+        updateInspectorResizers();
+    }
+
+    function togglePanel(panelKey) {
+        const config = panelConfigs.find((item) => item.key === panelKey);
+        if (!config?.panel) return;
+        const nextCollapsed = !isCollapsed(config.panel);
+        setPanelCollapsed(config.panel, nextCollapsed);
+        localStorage.setItem(config.storageKey, String(nextCollapsed));
+        const currentNodeHeight =
+            localStorage.getItem("awv-node-height") ||
+            nodePanel?.getBoundingClientRect().height ||
+            MIN_NODE_HEIGHT;
+        const currentReplayHeight =
+            localStorage.getItem("awv-replay-height") ||
+            replayPanel?.getBoundingClientRect().height ||
+            MIN_REPLAY_HEIGHT;
+        applyInspectorHeights(currentNodeHeight, currentReplayHeight);
+    }
 
     // Load initial width of workspace columns
     const savedWidth = localStorage.getItem("awv-inspector-width");
@@ -1599,11 +2305,22 @@ function setupResizers() {
         workspace.style.gridTemplateColumns = `1fr 14px ${savedWidth}px`;
     }
 
+    panelConfigs.forEach(({ panel, storageKey }) => {
+        setPanelCollapsed(panel, localStorage.getItem(storageKey) === "true");
+    });
+    updateInspectorResizers();
+
     // Load initial heights of inspector rows
     const savedNodeHeight = localStorage.getItem("awv-node-height");
     const savedReplayHeight = localStorage.getItem("awv-replay-height");
     if (savedNodeHeight && savedReplayHeight) {
-        inspector.style.gridTemplateRows = `${savedNodeHeight}px 14px ${savedReplayHeight}px 14px 1fr`;
+        applyInspectorHeights(savedNodeHeight, savedReplayHeight);
+    } else {
+        const inspectorHeight = inspector.getBoundingClientRect().height;
+        if (inspectorHeight) {
+            const usableHeight = inspectorHeight - RESIZER_SPACE;
+            applyInspectorHeights(usableHeight * 0.26, usableHeight * 0.42);
+        }
     }
 
     function getClientX(e) {
@@ -1659,9 +2376,16 @@ function setupResizers() {
         passive: true,
     });
 
+    panelConfigs.forEach(({ key, panel }) => {
+        panel
+            .querySelector(".panel-toggle")
+            ?.addEventListener("click", () => togglePanel(key));
+    });
+
     // Vertical Resizer 1 (Inspector: Node Panel vs Replay Panel)
     if (inspectorResizer1 && nodePanel && replayPanel) {
         function initVerticalResize1(e) {
+            if (isCollapsed(nodePanel) || isCollapsed(replayPanel)) return;
             const startY = getClientY(e);
             const startNodeHeight = nodePanel.getBoundingClientRect().height;
             const startReplayHeight =
@@ -1684,9 +2408,7 @@ function setupResizers() {
                     newNodeHeight = startNodeHeight + startReplayHeight - 80;
                 }
 
-                inspector.style.gridTemplateRows = `${newNodeHeight}px 14px ${newReplayHeight}px 14px 1fr`;
-                localStorage.setItem("awv-node-height", newNodeHeight);
-                localStorage.setItem("awv-replay-height", newReplayHeight);
+                applyInspectorHeights(newNodeHeight, newReplayHeight);
             }
 
             function onEnd() {
@@ -1713,6 +2435,7 @@ function setupResizers() {
     // Vertical Resizer 2 (Inspector: Replay Panel vs Feed Panel)
     if (inspectorResizer2 && replayPanel) {
         function initVerticalResize2(e) {
+            if (isCollapsed(replayPanel) || isCollapsed(feedPanel)) return;
             const startY = getClientY(e);
             const startReplayHeight =
                 replayPanel.getBoundingClientRect().height;
@@ -1741,8 +2464,7 @@ function setupResizers() {
                 const nodeHeight =
                     localStorage.getItem("awv-node-height") ||
                     currentNodeHeight;
-                inspector.style.gridTemplateRows = `${nodeHeight}px 14px ${newReplayHeight}px 14px 1fr`;
-                localStorage.setItem("awv-replay-height", newReplayHeight);
+                applyInspectorHeights(nodeHeight, newReplayHeight);
             }
 
             function onEnd() {
@@ -1768,6 +2490,16 @@ function setupResizers() {
 
     // Window Resize Handler: Update layout if window resizing causes container to be too small
     window.addEventListener("resize", () => {
+        const currentNodeHeight =
+            localStorage.getItem("awv-node-height") ||
+            nodePanel?.getBoundingClientRect().height ||
+            MIN_NODE_HEIGHT;
+        const currentReplayHeight =
+            localStorage.getItem("awv-replay-height") ||
+            replayPanel?.getBoundingClientRect().height ||
+            MIN_REPLAY_HEIGHT;
+        applyInspectorHeights(currentNodeHeight, currentReplayHeight);
+
         // Trigger fitToView(false) when window resizes and user hasn't panned/zoomed
         if (
             typeof userHasInteracted !== "undefined" &&
@@ -1782,157 +2514,30 @@ function setupResizers() {
 setupResizers();
 
 /* ═══════════════════════════════════════════════════════════ */
-/* Demo Logs Library                                           */
+/* Session Library                                             */
 /* ═══════════════════════════════════════════════════════════ */
 
-const demoLogs = {
-    entries: [],
-    loaded: false,
-};
-
-async function fetchDemoLogs() {
-    try {
-        const response = await fetch("./logs/index.json", {
-            cache: "no-store",
-        });
-        if (!response.ok) throw new Error("Failed to fetch demo logs index");
-        demoLogs.entries = await response.json();
-        demoLogs.loaded = true;
-    } catch {
-        demoLogs.entries = [];
-        demoLogs.loaded = true;
-    }
-    renderDemoLogs();
-}
-
-function renderDemoLogs() {
-    const list = els.demoLogsList;
-    const empty = els.demoLogsEmpty;
-    const count = els.demoLogsCount;
-    const entries = demoLogs.entries;
-
-    count.textContent = String(entries.length);
-
-    if (!entries.length) {
-        list.innerHTML = "";
-        list.style.display = "none";
-        empty.style.display = "";
-        return;
-    }
-
-    empty.style.display = "none";
-    list.style.display = "";
-    list.innerHTML = "";
-
-    entries.forEach((entry, index) => {
-        const li = document.createElement("li");
-        li.className = "demo-log-card";
-        li.dataset.index = String(index);
-        li.setAttribute("role", "button");
-        li.setAttribute("tabindex", "0");
-        li.title = `Load: ${entry.title}`;
-
-        const header = document.createElement("div");
-        header.className = "demo-log-header";
-
-        const playIcon = document.createElement("span");
-        playIcon.className = "demo-log-play-icon";
-        playIcon.innerHTML = `<svg viewBox="0 0 14 14" width="12" height="12" fill="currentColor"><polygon points="4,2 12,7 4,12"/></svg>`;
-
-        const title = document.createElement("span");
-        title.className = "demo-log-title";
-        title.textContent = entry.title || entry.file;
-
-        header.appendChild(playIcon);
-        header.appendChild(title);
-        li.appendChild(header);
-
-        if (entry.description) {
-            const desc = document.createElement("p");
-            desc.className = "demo-log-description";
-            desc.textContent = entry.description;
-            li.appendChild(desc);
-        }
-
-        const meta = document.createElement("div");
-        meta.className = "demo-log-meta";
-
-        if (entry.model) {
-            const pill = document.createElement("span");
-            pill.className = "demo-log-pill model-pill";
-            pill.textContent = entry.model;
-            meta.appendChild(pill);
-        }
-        if (entry.events) {
-            const pill = document.createElement("span");
-            pill.className = "demo-log-pill";
-            pill.textContent = `${entry.events} events`;
-            meta.appendChild(pill);
-        }
-        if (entry.agents) {
-            const pill = document.createElement("span");
-            pill.className = "demo-log-pill";
-            pill.textContent = `${entry.agents} agents`;
-            meta.appendChild(pill);
-        }
-        if (entry.duration) {
-            const pill = document.createElement("span");
-            pill.className = "demo-log-pill";
-            pill.textContent = entry.duration;
-            meta.appendChild(pill);
-        }
-
-        li.appendChild(meta);
-        list.appendChild(li);
-    });
-}
-
-async function loadDemoLog(index) {
-    const entry = demoLogs.entries[index];
-    if (!entry) return;
-
-    const card = els.demoLogsList.querySelector(`[data-index="${index}"]`);
-    if (card) card.classList.add("is-loading");
-
-    try {
-        const response = await fetch(`./logs/${entry.file}`);
-        if (!response.ok) throw new Error(`Failed to load ${entry.file}`);
-        const content = await response.text();
-        await replayLogContent(content, entry.title || entry.file);
-    } catch (error) {
-        window.alert(
-            error instanceof Error ? error.message : "Failed to load demo log.",
-        );
-    } finally {
-        if (card) card.classList.remove("is-loading");
-    }
-}
-
-// Wire up demo logs interactions
-els.demoLogsList.addEventListener("click", (e) => {
-    const card = e.target.closest(".demo-log-card");
+els.sessionLibraryList.addEventListener("click", (e) => {
+    const card = e.target.closest("[data-session-id]");
     if (!card) return;
-    const index = parseInt(card.dataset.index, 10);
-    if (!isNaN(index)) loadDemoLog(index);
+    replayCodexSession(card.dataset.sessionId);
 });
 
-els.demoLogsList.addEventListener("keydown", (e) => {
+els.sessionLibraryList.addEventListener("keydown", (e) => {
     if (e.code !== "Enter" && e.code !== "Space") return;
-    const card = e.target.closest(".demo-log-card");
+    const card = e.target.closest("[data-session-id]");
     if (!card) return;
     e.preventDefault();
-    const index = parseInt(card.dataset.index, 10);
-    if (!isNaN(index)) loadDemoLog(index);
+    replayCodexSession(card.dataset.sessionId);
 });
 
-els.demoLogsToggle.addEventListener("click", () => {
-    const section = els.demoLogsSection;
+els.sessionLibraryToggle.addEventListener("click", () => {
+    const section = els.sessionLibrarySection;
     const isCollapsed = section.classList.toggle("collapsed");
-    els.demoLogsToggle.setAttribute("aria-expanded", String(!isCollapsed));
+    els.sessionLibraryToggle.setAttribute("aria-expanded", String(!isCollapsed));
 });
 
-// Fetch demo logs on startup
-fetchDemoLogs();
+renderSessionLibrary();
 
 loadState()
     .then(() => {

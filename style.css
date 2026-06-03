@@ -363,7 +363,8 @@ h2 {
 
 .inspector {
     display: grid;
-    grid-template-rows: auto 14px auto 14px 1fr;
+    grid-template-rows: minmax(120px, 0.26fr) 14px minmax(220px, 0.42fr) 14px minmax(140px, 0.32fr);
+    min-height: 0;
 }
 
 .panel {
@@ -376,10 +377,61 @@ h2 {
 
 .node-panel {
     display: grid;
-    gap: 14px;
-    padding: 16px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.panel-body {
+    min-height: 0;
+}
+
+.panel-heading {
+    align-items: center;
+}
+
+.panel-heading-meta {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+}
+
+.panel-toggle {
+    align-items: center;
+    background: var(--surface-strong);
+    border: 1px solid #dbe2ea;
+    border-radius: 8px;
+    color: var(--muted);
+    display: inline-flex;
+    flex-shrink: 0;
+    height: 30px;
+    justify-content: center;
+    padding: 0;
+    transition:
+        background 0.18s ease,
+        border-color 0.18s ease,
+        color 0.18s ease,
+        transform 0.18s ease;
+    width: 30px;
+}
+
+.panel-toggle:hover {
+    background: #f7fafc;
+    border-color: #bcc7d3;
+    color: var(--accent);
+}
+
+.panel-toggle svg {
+    transition: transform 0.2s ease;
+}
+
+.collapsible-panel.is-collapsed .panel-toggle svg {
+    transform: rotate(-90deg);
+}
+
+.collapsible-panel.is-collapsed .panel-body {
+    display: none;
 }
 
 dl {
@@ -451,10 +503,26 @@ dd {
 
 .replay-panel {
     display: grid;
-    gap: 12px;
-    padding: 0 0 14px;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.node-panel .panel-body {
+    display: grid;
+    gap: 14px;
     overflow-y: auto;
     overflow-x: hidden;
+    padding: 16px;
+}
+
+.replay-panel .panel-body {
+    display: grid;
+    gap: 12px;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 0 14px;
 }
 
 .log-path {
@@ -492,6 +560,53 @@ dd {
     background: linear-gradient(180deg, #effcf8 0%, #e0f6ee 100%);
     border-color: var(--accent);
     color: var(--accent);
+}
+
+.replay-load-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 0 16px 10px;
+}
+
+.replay-picker-button {
+    appearance: none;
+    background: linear-gradient(135deg, #effcf8 0%, #ecfeff 100%);
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-radius: 8px;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    min-height: 38px;
+    padding: 0 12px;
+    transition:
+        border-color 0.18s ease,
+        background 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s ease;
+}
+
+.replay-picker-button:hover {
+    border-color: var(--accent);
+    box-shadow: 0 10px 20px rgba(15, 118, 110, 0.08);
+    transform: translateY(-1px);
+}
+
+.replay-picker-button.secondary {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border-color: #d7e0ea;
+    color: var(--ink);
+}
+
+.replay-dropnote {
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    margin: 0;
+    padding: 0 16px 12px;
 }
 
 /* ═══════════════════════════════════════════════════════════ */
@@ -653,6 +768,43 @@ dd {
     transform: scale(1.08);
 }
 
+.session-log-card.is-selected {
+    background: linear-gradient(135deg, #f6fffd 0%, #eefcf8 100%);
+    border-color: rgba(15, 118, 110, 0.4);
+    box-shadow:
+        0 2px 12px rgba(15, 118, 110, 0.12),
+        inset 0 0 0 1px rgba(15, 118, 110, 0.08);
+}
+
+.session-log-header {
+    align-items: flex-start;
+}
+
+.session-log-title-wrap {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.session-log-path {
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.session-log-description {
+    color: #334155;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    margin: 0;
+}
+
+.session-log-meta {
+    margin-top: 2px;
+}
+
 .demo-log-title {
     color: var(--ink);
     font-size: 0.86rem;
@@ -716,9 +868,20 @@ dd {
     background-color: rgba(0, 0, 0, 0.3);
 }
 
+@media (max-width: 600px) {
+    .replay-load-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
 .feed-panel {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.feed-panel .panel-body {
     min-height: 0;
 }
 
@@ -741,6 +904,7 @@ dd {
     gap: 8px;
     list-style: none;
     margin: 0;
+    height: 100%;
     min-height: 0;
     overflow: auto;
     padding: 12px;

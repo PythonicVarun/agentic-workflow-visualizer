@@ -144,97 +144,19 @@
                 </div>
 
                 <aside class="inspector" aria-label="Workflow details">
-                    <section class="panel node-panel">
-                        <h2 id="selected-title">Primary Agent</h2>
-                        <dl>
-                            <div>
-                                <dt>Status</dt>
-                                <dd id="selected-status">pending</dd>
-                            </div>
-                            <div>
-                                <dt>Role</dt>
-                                <dd id="selected-role">agent</dd>
-                            </div>
-                            <div>
-                                <dt>Elapsed</dt>
-                                <dd id="selected-elapsed">0s</dd>
-                            </div>
-                            <div>
-                                <dt>Tools</dt>
-                                <dd id="selected-tools">0</dd>
-                            </div>
-                        </dl>
-                        <p id="selected-action" class="selected-action">
-                            Waiting
-                        </p>
-                        <div class="prompt-card">
-                            <span class="prompt-label">Spawn Prompt</span>
-                            <p id="selected-prompt" class="selected-prompt">
-                                No spawn prompt captured.
-                            </p>
-                        </div>
-                    </section>
-
-                    <div
-                        class="resize-handle resize-handle-h"
-                        id="inspector-resizer-1"
-                        title="Drag to resize panel"
+                    <section
+                        class="panel node-panel collapsible-panel"
+                        data-panel-key="node"
                     >
-                        <div class="resize-handle-line"></div>
-                    </div>
-
-                    <section class="panel replay-panel">
-                        <div class="feed-heading">
-                            <h2>Replay Log</h2>
-                            <span id="log-file-name">No log</span>
-                        </div>
-                        <p id="log-path" class="log-path">
-                            Current log path will appear here.
-                        </p>
-                        <label
-                            id="replay-dropzone"
-                            class="replay-dropzone"
-                            for="replay-file"
-                        >
-                            Drop a `.jsonl` log here or click to load it.
-                        </label>
-                        <input
-                            id="replay-file"
-                            type="file"
-                            accept=".jsonl,.ndjson,.json,application/json,text/plain"
-                            hidden
-                        />
-
-                        <!-- Demo Logs Library -->
-                        <div class="demo-logs-section" id="demo-logs-section">
+                        <div class="feed-heading panel-heading">
+                            <h2 id="selected-title">Primary Agent</h2>
                             <button
-                                class="demo-logs-toggle"
-                                id="demo-logs-toggle"
+                                class="panel-toggle"
                                 type="button"
                                 aria-expanded="true"
+                                aria-label="Collapse Primary Agent panel"
                             >
                                 <svg
-                                    class="demo-logs-toggle-icon"
-                                    viewBox="0 0 16 16"
-                                    width="14"
-                                    height="14"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <path d="M2 3h12M2 8h12M2 13h12" />
-                                </svg>
-                                <span>Demo Logs</span>
-                                <span
-                                    class="demo-logs-count"
-                                    id="demo-logs-count"
-                                    >0</span
-                                >
-                                <svg
-                                    class="demo-logs-chevron"
-                                    id="demo-logs-chevron"
                                     viewBox="0 0 12 12"
                                     width="12"
                                     height="12"
@@ -246,145 +168,320 @@
                                     <polyline points="3,4.5 6,7.5 9,4.5" />
                                 </svg>
                             </button>
-                            <ol class="demo-logs-list" id="demo-logs-list"></ol>
-                            <div class="demo-logs-empty" id="demo-logs-empty">
-                                No demo logs available.
+                        </div>
+                        <div class="panel-body">
+                            <dl>
+                                <div>
+                                    <dt>Status</dt>
+                                    <dd id="selected-status">pending</dd>
+                                </div>
+                                <div>
+                                    <dt>Role</dt>
+                                    <dd id="selected-role">agent</dd>
+                                </div>
+                                <div>
+                                    <dt>Elapsed</dt>
+                                    <dd id="selected-elapsed">0s</dd>
+                                </div>
+                                <div>
+                                    <dt>Tools</dt>
+                                    <dd id="selected-tools">0</dd>
+                                </div>
+                            </dl>
+                            <p id="selected-action" class="selected-action">
+                                Waiting
+                            </p>
+                            <div class="prompt-card">
+                                <span class="prompt-label">Spawn Prompt</span>
+                                <p id="selected-prompt" class="selected-prompt">
+                                    No spawn prompt captured.
+                                </p>
                             </div>
                         </div>
+                    </section>
 
-                        <!-- Replay Player Controls -->
-                        <div class="replay-player" id="replay-player">
-                            <div class="replay-clock-row">
-                                <div class="replay-sim-clock">
+                    <div
+                        class="resize-handle resize-handle-h"
+                        id="inspector-resizer-1"
+                        title="Drag to resize panel"
+                    >
+                        <div class="resize-handle-line"></div>
+                    </div>
+
+                    <section
+                        class="panel replay-panel collapsible-panel"
+                        data-panel-key="replay"
+                    >
+                        <div class="feed-heading panel-heading">
+                            <h2>Replay Log</h2>
+                            <div class="panel-heading-meta">
+                                <span id="log-file-name">No log</span>
+                                <button
+                                    class="panel-toggle"
+                                    type="button"
+                                    aria-expanded="true"
+                                    aria-label="Collapse Replay Log panel"
+                                >
                                     <svg
-                                        class="clock-icon"
-                                        viewBox="0 0 16 16"
+                                        viewBox="0 0 12 12"
+                                        width="12"
+                                        height="12"
                                         fill="none"
                                         stroke="currentColor"
-                                        stroke-width="1.5"
+                                        stroke-width="2"
                                         stroke-linecap="round"
                                     >
-                                        <circle cx="8" cy="8" r="6.5" />
-                                        <polyline points="8,4 8,8 11,10" />
+                                        <polyline points="3,4.5 6,7.5 9,4.5" />
                                     </svg>
-                                    <span class="clock-label">Sim</span>
-                                    <span
-                                        class="clock-time"
-                                        id="replay-clock-time"
-                                        >--:--:--</span
-                                    >
-                                </div>
-                                <div class="replay-event-counter">
-                                    <span
-                                        class="counter-current"
-                                        id="replay-evt-current"
-                                        >0</span
-                                    >
-                                    <span class="counter-sep">/</span>
-                                    <span
-                                        class="counter-total"
-                                        id="replay-evt-total"
-                                        >0</span
-                                    >
-                                </div>
+                                </button>
                             </div>
-
-                            <div class="replay-progress-row">
-                                <div class="replay-progress-track">
-                                    <input
-                                        type="range"
-                                        id="replay-scrubber"
-                                        min="0"
-                                        max="100"
-                                        value="0"
-                                        step="1"
-                                        aria-label="Replay progress"
-                                    />
-                                </div>
-                            </div>
-
-                            <div class="replay-controls-row">
-                                <div class="replay-transport">
-                                    <button
-                                        id="replay-rewind"
-                                        type="button"
-                                        title="Rewind to start"
-                                        aria-label="Rewind"
-                                    >
-                                        <svg
-                                            viewBox="0 0 18 18"
-                                            width="16"
-                                            height="16"
-                                            fill="currentColor"
-                                        >
-                                            <rect
-                                                x="2"
-                                                y="4"
-                                                width="2.5"
-                                                height="10"
-                                                rx="0.8"
-                                            />
-                                            <polygon points="14,4 7,9 14,14" />
-                                        </svg>
-                                    </button>
-                                    <button
-                                        id="replay-play"
-                                        type="button"
-                                        title="Play / Pause"
-                                        aria-label="Play or Pause"
-                                    >
-                                        <svg
-                                            viewBox="0 0 18 18"
-                                            width="16"
-                                            height="16"
-                                            fill="currentColor"
-                                            id="replay-play-icon"
-                                        >
-                                            <polygon points="5,3 15,9 5,15" />
-                                        </svg>
-                                    </button>
-                                    <button
-                                        id="replay-step"
-                                        type="button"
-                                        title="Step forward one event"
-                                        aria-label="Step forward"
-                                    >
-                                        <svg
-                                            viewBox="0 0 18 18"
-                                            width="16"
-                                            height="16"
-                                            fill="currentColor"
-                                        >
-                                            <polygon points="4,4 11,9 4,14" />
-                                            <rect
-                                                x="12.5"
-                                                y="4"
-                                                width="2.5"
-                                                height="10"
-                                                rx="0.8"
-                                            />
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div class="replay-speed-control">
-                                    <span class="speed-label">Speed</span>
-                                    <select
-                                        id="replay-speed"
-                                        class="replay-speed-select"
-                                        aria-label="Replay speed"
-                                    >
-                                        <option value="0.25">0.25×</option>
-                                        <option value="0.5">0.5×</option>
-                                        <option value="1" selected>1×</option>
-                                        <option value="2">2×</option>
-                                        <option value="4">4×</option>
-                                        <option value="8">8×</option>
-                                        <option value="10">10×</option>
-                                    </select>
-                                </div>
-                                <span class="replay-elapsed" id="replay-elapsed"
-                                    >0s / 0s</span
+                        </div>
+                        <div class="panel-body">
+                            <p id="log-path" class="log-path">
+                                Current log path will appear here.
+                            </p>
+                            <label
+                                id="replay-dropzone"
+                                class="replay-dropzone"
+                                for="replay-file"
+                            >
+                                Drop Codex `.jsonl` logs here or click to
+                                choose them.
+                            </label>
+                            <div class="replay-load-actions">
+                                <button
+                                    id="pick-log-files"
+                                    class="replay-picker-button"
+                                    type="button"
                                 >
+                                    Choose Log Files
+                                </button>
+                                <button
+                                    id="pick-log-folder"
+                                    class="replay-picker-button secondary"
+                                    type="button"
+                                >
+                                    Choose Sessions Folder
+                                </button>
+                            </div>
+                            <p class="replay-dropnote">
+                                Load files from
+                                `%USERPROFILE%\.codex\sessions`. Primary
+                                sessions are listed here; matching sub-agent
+                                logs stay hidden and are merged into the replay
+                                automatically.
+                            </p>
+                            <input
+                                id="replay-file"
+                                type="file"
+                                accept=".jsonl,.ndjson,.json,application/json,text/plain"
+                                multiple
+                                hidden
+                            />
+                            <input
+                                id="replay-folder"
+                                type="file"
+                                accept=".jsonl,.ndjson,.json,application/json,text/plain"
+                                multiple
+                                webkitdirectory
+                                directory
+                                hidden
+                            />
+
+                            <div
+                                class="demo-logs-section session-library-section"
+                                id="session-library-section"
+                            >
+                                <button
+                                    class="demo-logs-toggle session-library-toggle"
+                                    id="session-library-toggle"
+                                    type="button"
+                                    aria-expanded="true"
+                                >
+                                    <svg
+                                        class="demo-logs-toggle-icon"
+                                        viewBox="0 0 16 16"
+                                        width="14"
+                                        height="14"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M2 3h12M2 8h12M2 13h12" />
+                                    </svg>
+                                    <span>Codex Sessions</span>
+                                    <span
+                                        class="demo-logs-count session-library-count"
+                                        id="session-library-count"
+                                        >0</span
+                                    >
+                                    <svg
+                                        class="demo-logs-chevron session-library-chevron"
+                                        id="session-library-chevron"
+                                        viewBox="0 0 12 12"
+                                        width="12"
+                                        height="12"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                    >
+                                        <polyline points="3,4.5 6,7.5 9,4.5" />
+                                    </svg>
+                                </button>
+                                <ol
+                                    class="demo-logs-list session-library-list"
+                                    id="session-library-list"
+                                ></ol>
+                                <div
+                                    class="demo-logs-empty session-library-empty"
+                                    id="session-library-empty"
+                                >
+                                    Load one or more Codex session logs to list
+                                    the primary sessions.
+                                </div>
+                            </div>
+
+                            <!-- Replay Player Controls -->
+                            <div class="replay-player" id="replay-player">
+                                <div class="replay-clock-row">
+                                    <div class="replay-sim-clock">
+                                        <svg
+                                            class="clock-icon"
+                                            viewBox="0 0 16 16"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.5"
+                                            stroke-linecap="round"
+                                        >
+                                            <circle cx="8" cy="8" r="6.5" />
+                                            <polyline points="8,4 8,8 11,10" />
+                                        </svg>
+                                        <span class="clock-label">Sim</span>
+                                        <span
+                                            class="clock-time"
+                                            id="replay-clock-time"
+                                            >--:--:--</span
+                                        >
+                                    </div>
+                                    <div class="replay-event-counter">
+                                        <span
+                                            class="counter-current"
+                                            id="replay-evt-current"
+                                            >0</span
+                                        >
+                                        <span class="counter-sep">/</span>
+                                        <span
+                                            class="counter-total"
+                                            id="replay-evt-total"
+                                            >0</span
+                                        >
+                                    </div>
+                                </div>
+
+                                <div class="replay-progress-row">
+                                    <div class="replay-progress-track">
+                                        <input
+                                            type="range"
+                                            id="replay-scrubber"
+                                            min="0"
+                                            max="100"
+                                            value="0"
+                                            step="1"
+                                            aria-label="Replay progress"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div class="replay-controls-row">
+                                    <div class="replay-transport">
+                                        <button
+                                            id="replay-rewind"
+                                            type="button"
+                                            title="Rewind to start"
+                                            aria-label="Rewind"
+                                        >
+                                            <svg
+                                                viewBox="0 0 18 18"
+                                                width="16"
+                                                height="16"
+                                                fill="currentColor"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="4"
+                                                    width="2.5"
+                                                    height="10"
+                                                    rx="0.8"
+                                                />
+                                                <polygon
+                                                    points="14,4 7,9 14,14"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            id="replay-play"
+                                            type="button"
+                                            title="Play / Pause"
+                                            aria-label="Play or Pause"
+                                        >
+                                            <svg
+                                                viewBox="0 0 18 18"
+                                                width="16"
+                                                height="16"
+                                                fill="currentColor"
+                                                id="replay-play-icon"
+                                            >
+                                                <polygon points="5,3 15,9 5,15" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            id="replay-step"
+                                            type="button"
+                                            title="Step forward one event"
+                                            aria-label="Step forward"
+                                        >
+                                            <svg
+                                                viewBox="0 0 18 18"
+                                                width="16"
+                                                height="16"
+                                                fill="currentColor"
+                                            >
+                                                <polygon points="4,4 11,9 4,14" />
+                                                <rect
+                                                    x="12.5"
+                                                    y="4"
+                                                    width="2.5"
+                                                    height="10"
+                                                    rx="0.8"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="replay-speed-control">
+                                        <span class="speed-label">Speed</span>
+                                        <select
+                                            id="replay-speed"
+                                            class="replay-speed-select"
+                                            aria-label="Replay speed"
+                                        >
+                                            <option value="0.25">0.25×</option>
+                                            <option value="0.5">0.5×</option>
+                                            <option value="1" selected>1×</option>
+                                            <option value="2">2×</option>
+                                            <option value="4">4×</option>
+                                            <option value="8">8×</option>
+                                            <option value="10">10×</option>
+                                        </select>
+                                    </div>
+                                    <span
+                                        class="replay-elapsed"
+                                        id="replay-elapsed"
+                                        >0s / 0s</span
+                                    >
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -397,12 +494,37 @@
                         <div class="resize-handle-line"></div>
                     </div>
 
-                    <section class="panel feed-panel">
-                        <div class="feed-heading">
+                    <section
+                        class="panel feed-panel collapsible-panel"
+                        data-panel-key="feed"
+                    >
+                        <div class="feed-heading panel-heading">
                             <h2>Event Feed</h2>
-                            <span id="sequence">0</span>
+                            <div class="panel-heading-meta">
+                                <span id="sequence">0</span>
+                                <button
+                                    class="panel-toggle"
+                                    type="button"
+                                    aria-expanded="true"
+                                    aria-label="Collapse Event Feed panel"
+                                >
+                                    <svg
+                                        viewBox="0 0 12 12"
+                                        width="12"
+                                        height="12"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                    >
+                                        <polyline points="3,4.5 6,7.5 9,4.5" />
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
-                        <ol id="event-feed" class="event-feed"></ol>
+                        <div class="panel-body">
+                            <ol id="event-feed" class="event-feed"></ol>
+                        </div>
                     </section>
                 </aside>
             </main>
