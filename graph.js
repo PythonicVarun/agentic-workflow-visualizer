@@ -2214,69 +2214,81 @@ function setupResizers() {
         const nodeCollapsed = isCollapsed(nodePanel);
         const replayCollapsed = isCollapsed(replayPanel);
         const feedCollapsed = isCollapsed(feedPanel);
+        const availableHeight = inspectorHeight - RESIZER_SPACE;
 
+        const collapsedTotal =
+            (nodeCollapsed ? COLLAPSED_PANEL_HEIGHT : 0) +
+            (replayCollapsed ? COLLAPSED_PANEL_HEIGHT : 0) +
+            (feedCollapsed ? COLLAPSED_PANEL_HEIGHT : 0);
+        const openCount =
+            Number(!nodeCollapsed) + Number(!replayCollapsed) + Number(!feedCollapsed);
+        const openHeightBudget = Math.max(0, availableHeight - collapsedTotal);
         let nextNodeHeight = nodeCollapsed
             ? COLLAPSED_PANEL_HEIGHT
             : Math.max(MIN_NODE_HEIGHT, Number.parseFloat(nodeHeight) || 0);
         let nextReplayHeight = replayCollapsed
             ? COLLAPSED_PANEL_HEIGHT
             : Math.max(MIN_REPLAY_HEIGHT, Number.parseFloat(replayHeight) || 0);
-        const minFeedHeight = feedCollapsed
-            ? COLLAPSED_PANEL_HEIGHT
-            : MIN_FEED_HEIGHT;
-        const availableHeight = inspectorHeight - RESIZER_SPACE;
+        let nodeRow = `${nextNodeHeight}px`;
+        let replayRow = `${nextReplayHeight}px`;
+        let feedRow = feedCollapsed
+            ? `${COLLAPSED_PANEL_HEIGHT}px`
+            : `minmax(${MIN_FEED_HEIGHT}px, 1fr)`;
 
-        if (nextNodeHeight + nextReplayHeight > availableHeight - minFeedHeight) {
-            const overflow =
-                nextNodeHeight + nextReplayHeight - (availableHeight - minFeedHeight);
-            const nodeSlack = nodeCollapsed
-                ? 0
-                : Math.max(0, nextNodeHeight - MIN_NODE_HEIGHT);
-            const replaySlack = replayCollapsed
-                ? 0
-                : Math.max(0, nextReplayHeight - MIN_REPLAY_HEIGHT);
-            const totalSlack = nodeSlack + replaySlack;
-
-            if (totalSlack > 0) {
-                const nodeCut = Math.min(
-                    nodeSlack,
-                    Math.round((overflow * nodeSlack) / totalSlack),
-                );
-                nextNodeHeight -= nodeCut;
-                nextReplayHeight -= Math.min(
-                    replaySlack,
-                    overflow - nodeCut,
-                );
+        if (openCount === 1) {
+            if (!nodeCollapsed) {
+                nodeRow = `minmax(${MIN_NODE_HEIGHT}px, 1fr)`;
+                nextNodeHeight = openHeightBudget;
+            } else if (!replayCollapsed) {
+                replayRow = `minmax(${MIN_REPLAY_HEIGHT}px, 1fr)`;
+                nextReplayHeight = openHeightBudget;
+            } else if (!feedCollapsed) {
+                feedRow = `minmax(${MIN_FEED_HEIGHT}px, 1fr)`;
             }
+        } else if (!feedCollapsed) {
+            const maxFixedHeight = Math.max(0, openHeightBudget - MIN_FEED_HEIGHT);
+
+            if (!nodeCollapsed && replayCollapsed) {
+                nextNodeHeight = Math.min(nextNodeHeight, maxFixedHeight);
+                nodeRow = `${Math.max(MIN_NODE_HEIGHT, nextNodeHeight)}px`;
+            } else if (nodeCollapsed && !replayCollapsed) {
+                nextReplayHeight = Math.min(nextReplayHeight, maxFixedHeight);
+                replayRow = `${Math.max(MIN_REPLAY_HEIGHT, nextReplayHeight)}px`;
+            } else if (!nodeCollapsed && !replayCollapsed) {
+                const nodeMin = MIN_NODE_HEIGHT;
+                const replayMin = MIN_REPLAY_HEIGHT;
+                const distributable = Math.max(0, maxFixedHeight - nodeMin - replayMin);
+                const desiredNodeExtra = Math.max(0, nextNodeHeight - nodeMin);
+                const desiredReplayExtra = Math.max(0, nextReplayHeight - replayMin);
+                const totalDesiredExtra = desiredNodeExtra + desiredReplayExtra;
+
+                let nodeExtra = distributable / 2;
+                let replayExtra = distributable - nodeExtra;
+
+                if (totalDesiredExtra > 0) {
+                    nodeExtra =
+                        (distributable * desiredNodeExtra) / totalDesiredExtra;
+                    replayExtra = distributable - nodeExtra;
+                }
+
+                nextNodeHeight = nodeMin + nodeExtra;
+                nextReplayHeight = replayMin + replayExtra;
+                nodeRow = `${nextNodeHeight}px`;
+                replayRow = `${nextReplayHeight}px`;
+            }
+        } else if (!nodeCollapsed && !replayCollapsed) {
+            const totalDesired = Math.max(1, nextNodeHeight + nextReplayHeight);
+            nextNodeHeight = (openHeightBudget * nextNodeHeight) / totalDesired;
+            nextReplayHeight = openHeightBudget - nextNodeHeight;
+            nodeRow = `${nextNodeHeight}px`;
+            replayRow = `${nextReplayHeight}px`;
         }
 
-        const feedHeight =
-            inspectorHeight - RESIZER_SPACE - nextNodeHeight - nextReplayHeight;
-
-        if (feedHeight < minFeedHeight) {
-            const deficit = minFeedHeight - feedHeight;
-            const replayCut = Math.min(
-                replayCollapsed
-                    ? 0
-                    : Math.max(0, nextReplayHeight - MIN_REPLAY_HEIGHT),
-                deficit,
-            );
-            nextReplayHeight -= replayCut;
-            nextNodeHeight -= Math.min(
-                nodeCollapsed ? 0 : Math.max(0, nextNodeHeight - MIN_NODE_HEIGHT),
-                deficit - replayCut,
-            );
-        }
-
-        inspector.style.gridTemplateRows = `${nextNodeHeight}px 14px ${nextReplayHeight}px 14px ${
-            feedCollapsed
-                ? `${COLLAPSED_PANEL_HEIGHT}px`
-                : `minmax(${MIN_FEED_HEIGHT}px, 1fr)`
-        }`;
-        if (!nodeCollapsed) {
+        inspector.style.gridTemplateRows = `${nodeRow} 14px ${replayRow} 14px ${feedRow}`;
+        if (!nodeCollapsed && Number.isFinite(nextNodeHeight)) {
             localStorage.setItem("awv-node-height", String(nextNodeHeight));
         }
-        if (!replayCollapsed) {
+        if (!replayCollapsed && Number.isFinite(nextReplayHeight)) {
             localStorage.setItem("awv-replay-height", String(nextReplayHeight));
         }
         updateInspectorResizers();
@@ -2285,6 +2297,12 @@ function setupResizers() {
     function togglePanel(panelKey) {
         const config = panelConfigs.find((item) => item.key === panelKey);
         if (!config?.panel) return;
+        const currentlyOpen = panelConfigs.filter(
+            ({ panel }) => !isCollapsed(panel),
+        ).length;
+        if (currentlyOpen === 1 && !isCollapsed(config.panel)) {
+            return;
+        }
         const nextCollapsed = !isCollapsed(config.panel);
         setPanelCollapsed(config.panel, nextCollapsed);
         localStorage.setItem(config.storageKey, String(nextCollapsed));
