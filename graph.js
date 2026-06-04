@@ -14,6 +14,9 @@ const state = {
     selectedId: "primary_agent",
     connected: false,
     backendAvailable: false,
+    modalNodeId: null,
+    liveDetailSequence: null,
+    liveDetailSyncing: false,
 };
 
 const sessionLibrary = {
@@ -50,9 +53,35 @@ const els = {
     selectedTools: document.querySelector("#selected-tools"),
     selectedAction: document.querySelector("#selected-action"),
     selectedPrompt: document.querySelector("#selected-prompt"),
+    selectedToolHistory: document.querySelector("#selected-tool-history"),
+    selectedToolHistoryCount: document.querySelector(
+        "#selected-tool-history-count",
+    ),
+    selectedToolHistoryEmpty: document.querySelector(
+        "#selected-tool-history-empty",
+    ),
     demoButton: document.querySelector("#demo-button"),
     resetButton: document.querySelector("#reset-button"),
     stage: document.querySelector("#graph-stage"),
+    agentModal: document.querySelector("#agent-modal"),
+    agentModalBackdrop: document.querySelector("#agent-modal-backdrop"),
+    agentModalDialog: document.querySelector("#agent-modal-dialog"),
+    agentModalTitle: document.querySelector("#agent-modal-title"),
+    agentModalSubtitle: document.querySelector("#agent-modal-subtitle"),
+    agentModalClose: document.querySelector("#agent-modal-close"),
+    agentModalRole: document.querySelector("#agent-modal-role"),
+    agentModalStatus: document.querySelector("#agent-modal-status"),
+    agentModalElapsed: document.querySelector("#agent-modal-elapsed"),
+    agentModalTools: document.querySelector("#agent-modal-tools"),
+    agentModalAction: document.querySelector("#agent-modal-action"),
+    agentModalPrompt: document.querySelector("#agent-modal-prompt"),
+    agentModalToolHistory: document.querySelector("#agent-modal-tool-history"),
+    agentModalToolHistoryCount: document.querySelector(
+        "#agent-modal-tool-history-count",
+    ),
+    agentModalToolHistoryEmpty: document.querySelector(
+        "#agent-modal-tool-history-empty",
+    ),
     zoomIn: document.querySelector("#zoom-in"),
     zoomOut: document.querySelector("#zoom-out"),
     zoomFit: document.querySelector("#zoom-fit"),
@@ -383,12 +412,86 @@ function redact(value) {
 
 function summarize(value, limit = 140) {
     if (value === null || value === undefined) return "";
-    if (typeof value === "string") return trim(value, limit);
+    if (typeof value === "string") return trim(stripAnsi(value), limit);
     try {
         return trim(JSON.stringify(redact(value)), limit);
     } catch {
         return trim(String(value), limit);
     }
+}
+
+function stripAnsi(text) {
+    return String(text || "").replace(
+        // eslint-disable-next-line no-control-regex
+        /\u001b\[[0-9;?]*[ -/]*[@-~]/g,
+        "",
+    );
+}
+
+function normalizeToolValue(value) {
+    const parsed = parseToolPayload(value);
+    if (typeof parsed === "string") {
+        return stripAnsi(parsed).trim();
+    }
+    return redact(parsed);
+}
+
+function formatToolValue(value) {
+    const normalized = normalizeToolValue(value);
+    if (normalized === null || normalized === undefined || normalized === "") {
+        return "None";
+    }
+    if (typeof normalized === "string") return normalized;
+    try {
+        return JSON.stringify(normalized, null, 2);
+    } catch {
+        return String(normalized);
+    }
+}
+
+function toolRunSummary(run) {
+    return (
+        summarize(run.output, 84) ||
+        summarize(run.input, 84) ||
+        "Waiting for tool output"
+    );
+}
+
+function toolRunStatus(run) {
+    return run.status === "running" ? "running" : "complete";
+}
+
+function createToolRun(toolName, event, data, sequence, fallbackInput = null) {
+    const runId =
+        data.tool_use_id ||
+        data.call_id ||
+        data.id ||
+        `${event.agent_id}:${toolName}:${sequence}`;
+    return {
+        id: runId,
+        tool_name: toolName || "tool",
+        input: normalizeToolValue(
+            data.args ?? data.input ?? data.tool_input ?? fallbackInput,
+        ),
+        output: normalizeToolValue(
+            data.output ?? data.result ?? data.tool_response ?? null,
+        ),
+        status:
+            data.output !== undefined ||
+            data.result !== undefined ||
+            data.tool_response !== undefined
+                ? "complete"
+                : "running",
+        started_at: parseDate(event.timestamp).toISOString(),
+        completed_at:
+            data.output !== undefined ||
+            data.result !== undefined ||
+            data.tool_response !== undefined
+                ? parseDate(event.timestamp).toISOString()
+                : null,
+        sequence,
+        summary: data.summary || null,
+    };
 }
 
 function basename(path) {
@@ -535,6 +638,11 @@ function snapshotNode(node, now) {
         spawn_prompt: node.spawn_prompt,
         event_count: node.event_count,
         tool_count: node.tool_count,
+        tool_runs: (node.tool_runs || []).map((run) => ({
+            ...run,
+            input: normalizeToolValue(run.input),
+            output: normalizeToolValue(run.output),
+        })),
     };
 }
 
@@ -574,6 +682,7 @@ function buildGraphFromEvents(events, logDetails = {}) {
     const nodes = new Map();
     const edges = new Map();
     const feed = [];
+    const pendingToolRuns = new Map();
     let sequence = 0;
 
     function ensureNode(
@@ -604,6 +713,7 @@ function buildGraphFromEvents(events, logDetails = {}) {
                 spawn_prompt: null,
                 event_count: 0,
                 tool_count: 0,
+                tool_runs: [],
             };
             nodes.set(agentId, node);
             return node;
@@ -654,6 +764,10 @@ function buildGraphFromEvents(events, logDetails = {}) {
             to: childId,
             label,
         });
+    }
+
+    function pendingToolKey(agentId, runId) {
+        return `${agentId}:${runId}`;
     }
 
     for (const rawEvent of events) {
@@ -710,14 +824,57 @@ function buildGraphFromEvents(events, logDetails = {}) {
                     action: `Calling ${toolName}${suffix}`,
                 });
                 node.tool_count += 1;
+                const run = createToolRun(toolName, event, data, sequence, args);
+                node.tool_runs.push(run);
+                pendingToolRuns.set(
+                    pendingToolKey(event.agent_id, run.id),
+                    run,
+                );
                 break;
             }
             case "tool_output": {
                 const toolName = data.tool_name || data.tool || "tool";
                 const output = data.output || data.result || data.tool_response;
-                touch(event, {
+                const node = touch(event, {
                     action: `${toolName} result: ${summarize(output, 100)}`,
                 });
+                const toolId =
+                    data.tool_use_id ||
+                    data.call_id ||
+                    data.id ||
+                    `${event.agent_id}:${toolName}:${sequence}`;
+                const existingRun = pendingToolRuns.get(
+                    pendingToolKey(event.agent_id, toolId),
+                );
+                if (existingRun) {
+                    existingRun.output = normalizeToolValue(output);
+                    if (
+                        existingRun.input === null ||
+                        existingRun.input === undefined ||
+                        existingRun.input === ""
+                    ) {
+                        existingRun.input = normalizeToolValue(
+                            data.args ?? data.input ?? data.tool_input ?? null,
+                        );
+                    }
+                    existingRun.status = "complete";
+                    existingRun.completed_at = parseDate(event.timestamp).toISOString();
+                    existingRun.summary = data.summary || existingRun.summary;
+                    pendingToolRuns.delete(
+                        pendingToolKey(event.agent_id, toolId),
+                    );
+                } else {
+                    node.tool_runs.push(
+                        createToolRun(
+                            toolName,
+                            event,
+                            data,
+                            sequence,
+                            data.args ?? data.input ?? data.tool_input ?? null,
+                        ),
+                    );
+                    node.tool_count += 1;
+                }
                 const spawnedAgentId = data.spawned_agent_id;
                 if (spawnedAgentId) {
                     const parentId = event.agent_id || ROOT_AGENT_ID;
@@ -1270,6 +1427,7 @@ function translateCodexSession(session, rootSessionId, spawnHints) {
                 data: {
                     tool_name: payload.name || "tool",
                     args: parsedArgs,
+                    call_id: payload.call_id,
                 },
             });
             return;
@@ -1287,6 +1445,7 @@ function translateCodexSession(session, rootSessionId, spawnHints) {
             const data = {
                 tool_name: toolName,
                 output,
+                call_id: payload.call_id,
             };
             if (toolName === "spawn_agent" && output?.agent_id) {
                 data.spawned_agent_id = output.agent_id;
@@ -1370,10 +1529,129 @@ async function handleReplaySelection(fileList) {
     await replayLogContent(text, file.name);
 }
 
+function graphHasDetailedTools(graph) {
+    return (graph?.nodes || []).some(
+        (node) => Array.isArray(node.tool_runs) && node.tool_runs.length > 0,
+    );
+}
+
+function getNodeToolRuns(node) {
+    return (node?.tool_runs || []).slice().sort((a, b) => {
+        const aSeq = Number(a?.sequence || 0);
+        const bSeq = Number(b?.sequence || 0);
+        return bSeq - aSeq;
+    });
+}
+
+function getNodeHeight(node) {
+    void node;
+    return 98;
+}
+
+function createToolHistoryCard(run) {
+    const card = document.createElement("article");
+    card.className = `tool-history-card ${toolRunStatus(run)}`;
+
+    const header = document.createElement("div");
+    header.className = "tool-history-card-header";
+
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "tool-history-card-title-wrap";
+
+    const title = document.createElement("strong");
+    title.className = "tool-history-card-title";
+    title.textContent = run.tool_name || "tool";
+
+    const summary = document.createElement("span");
+    summary.className = "tool-history-card-summary";
+    summary.textContent = toolRunSummary(run);
+
+    titleWrap.append(title, summary);
+
+    const status = document.createElement("span");
+    status.className = `tool-history-status ${toolRunStatus(run)}`;
+    status.textContent = toolRunStatus(run);
+
+    header.append(titleWrap, status);
+
+    const body = document.createElement("div");
+    body.className = "tool-history-card-body";
+
+    const callMeta = document.createElement("div");
+    callMeta.className = "tool-history-meta";
+    callMeta.textContent = `Call: ${run.id || "n/a"}`;
+
+    const inputLabel = document.createElement("span");
+    inputLabel.className = "tool-history-label";
+    inputLabel.textContent = "Input";
+    const input = document.createElement("pre");
+    input.className = "tool-history-pre";
+    input.textContent = formatToolValue(run.input);
+
+    const outputLabel = document.createElement("span");
+    outputLabel.className = "tool-history-label";
+    outputLabel.textContent = "Output";
+    const output = document.createElement("pre");
+    output.className = "tool-history-pre";
+    output.textContent = formatToolValue(run.output);
+
+    body.append(callMeta, inputLabel, input, outputLabel, output);
+    card.append(header, body);
+    return card;
+}
+
+function renderToolHistory(container, emptyEl, countEl, node) {
+    const runs = getNodeToolRuns(node);
+    if (countEl) countEl.textContent = String(runs.length);
+    container.replaceChildren();
+    if (!runs.length) {
+        if (emptyEl) emptyEl.classList.remove("hidden");
+        return;
+    }
+    if (emptyEl) emptyEl.classList.add("hidden");
+    runs.forEach((run) => {
+        container.appendChild(createToolHistoryCard(run));
+    });
+}
+
+function closeAgentModal() {
+    state.modalNodeId = null;
+    els.agentModal.classList.add("hidden");
+    els.agentModal.setAttribute("aria-hidden", "true");
+}
+
+function openAgentModal(node) {
+    if (!node) return;
+    state.modalNodeId = node.id;
+    els.agentModalTitle.textContent = node.label || "Agent Details";
+    els.agentModalSubtitle.textContent = `${trim(
+        node.id,
+        44,
+    )} | ${node.role || "agent"}`;
+    els.agentModalRole.textContent = node.role || "agent";
+    els.agentModalStatus.textContent = normalizeStatus(node.status);
+    els.agentModalElapsed.textContent = formatElapsed(node.elapsed_seconds);
+    els.agentModalTools.textContent = String(node.tool_count || 0);
+    els.agentModalAction.textContent = node.last_action || "Waiting";
+    els.agentModalPrompt.textContent =
+        node.spawn_prompt || "No spawn prompt captured.";
+    renderToolHistory(
+        els.agentModalToolHistory,
+        els.agentModalToolHistoryEmpty,
+        els.agentModalToolHistoryCount,
+        node,
+    );
+    els.agentModal.classList.remove("hidden");
+    els.agentModal.setAttribute("aria-hidden", "false");
+}
+
 function buildLayout(nodes, edges) {
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const children = new Map(nodes.map((node) => [node.id, []]));
     const targets = new Set();
+    const heightById = new Map(
+        nodes.map((node) => [node.id, getNodeHeight(node)]),
+    );
 
     edges.forEach((edge) => {
         if (!byId.has(edge.from) || !byId.has(edge.to)) return;
@@ -1437,21 +1715,39 @@ function buildLayout(nodes, edges) {
     });
 
     const nodeWidth = 250;
-    const nodeHeight = 98;
     const gapX = 285;
-    const gapY = 155;
+    const gapY = 66;
     const marginX = 50;
     const marginY = 56;
+    const depthHeights = Array.from({ length: maxDepth + 1 }, () => 0);
+    positions.forEach((position, id) => {
+        depthHeights[position.depth] = Math.max(
+            depthHeights[position.depth],
+            heightById.get(id) || 118,
+        );
+    });
+    const depthOffsets = [];
+    let offsetY = marginY;
+    depthHeights.forEach((depthHeight, depth) => {
+        depthOffsets[depth] = offsetY;
+        offsetY += depthHeight + gapY;
+    });
     const width = Math.max(960, marginX * 2 + Math.max(1, leafIndex) * gapX);
-    const height = Math.max(520, marginY * 2 + (maxDepth + 1) * gapY);
+    const totalNodeHeight = depthHeights.reduce((sum, value) => sum + value, 0);
+    const height = Math.max(
+        520,
+        marginY * 2 +
+            totalNodeHeight +
+            Math.max(0, depthHeights.length - 1) * gapY,
+    );
 
     const layout = new Map();
     positions.forEach((position, id) => {
         layout.set(id, {
             x: marginX + position.xIndex * gapX,
-            y: marginY + position.depth * gapY,
+            y: depthOffsets[position.depth] || marginY,
             width: nodeWidth,
-            height: nodeHeight,
+            height: heightById.get(id) || 118,
         });
     });
 
@@ -1497,11 +1793,13 @@ function drawNode(node, box) {
 
     group.addEventListener("click", () => {
         state.selectedId = node.id;
+        openAgentModal(node);
         render();
     });
     group.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
             state.selectedId = node.id;
+            openAgentModal(node);
             render();
         }
     });
@@ -1530,7 +1828,7 @@ function drawNode(node, box) {
     );
     nodeText(
         group,
-        { class: "node-action", x: 18, y: 73 },
+        { class: "node-action", x: 18, y: 72 },
         trim(node.last_action, 39),
     );
 
@@ -1648,6 +1946,12 @@ function renderSelected() {
         els.selectedTools.textContent = "0";
         els.selectedAction.textContent = "Waiting";
         els.selectedPrompt.textContent = "No spawn prompt captured.";
+        renderToolHistory(
+            els.selectedToolHistory,
+            els.selectedToolHistoryEmpty,
+            els.selectedToolHistoryCount,
+            null,
+        );
         return;
     }
 
@@ -1659,6 +1963,12 @@ function renderSelected() {
     els.selectedAction.textContent = selected.last_action || "Waiting";
     els.selectedPrompt.textContent =
         selected.spawn_prompt || "No spawn prompt captured.";
+    renderToolHistory(
+        els.selectedToolHistory,
+        els.selectedToolHistoryEmpty,
+        els.selectedToolHistoryCount,
+        selected,
+    );
 }
 
 function syncSelectedNode() {
@@ -1731,6 +2041,48 @@ function render() {
     renderFeed();
     renderSelected();
     renderLogDetails();
+    if (state.modalNodeId) {
+        const activeNode = (state.graph.nodes || []).find(
+            (node) => node.id === state.modalNodeId,
+        );
+        if (activeNode) {
+            openAgentModal(activeNode);
+        } else {
+            closeAgentModal();
+        }
+    }
+}
+
+async function syncLiveDetailedGraph(graph) {
+    const details = graph?.log || {};
+    const mode = details.mode || "live";
+    if (
+        replay.active ||
+        !state.backendAvailable ||
+        mode !== "live" ||
+        !details.current_path ||
+        state.liveDetailSyncing ||
+        state.liveDetailSequence === graph?.sequence
+    ) {
+        return;
+    }
+
+    state.liveDetailSyncing = true;
+    try {
+        const response = await fetch("/log/current", { cache: "no-store" });
+        if (!response.ok) return;
+        const text = await response.text();
+        const entries = parseLogEntries(text);
+        const events = extractEventsFromEntries(entries);
+        if (!events.length) return;
+        state.graph = buildGraphFromEvents(events, details);
+        state.liveDetailSequence = graph.sequence;
+        render();
+    } catch {
+        // Keep the backend summary graph if the current log cannot be reloaded.
+    } finally {
+        state.liveDetailSyncing = false;
+    }
 }
 
 async function loadState() {
@@ -1750,9 +2102,13 @@ async function loadState() {
             current_path: null,
             file_name: null,
         });
+        state.liveDetailSequence = null;
         setConnection(false);
     }
     render();
+    if (state.backendAvailable && !graphHasDetailedTools(state.graph)) {
+        void syncLiveDetailedGraph(state.graph);
+    }
 }
 
 function handleSse(event) {
@@ -1761,6 +2117,11 @@ function handleSse(event) {
     if (payload.state) {
         state.graph = payload.state;
         render();
+        if (!graphHasDetailedTools(state.graph)) {
+            void syncLiveDetailedGraph(payload.state);
+        } else {
+            state.liveDetailSequence = payload.state.sequence ?? null;
+        }
     }
 }
 
@@ -1997,6 +2358,7 @@ function replayStop() {
     replay.currentIndex = 0;
     replay.simTimeMs = 0;
     replay.totalDuration = 0;
+    state.liveDetailSequence = null;
     els.replayPlayer.classList.remove("active");
 }
 
@@ -2039,6 +2401,7 @@ function replayLoadEvents(events, filename, logDetails = {}) {
     state.graph = createEmptyGraph(replay.logDetails);
     state.selectedId = ROOT_AGENT_ID;
     userHasInteracted = false;
+    state.liveDetailSequence = null;
     setConnection(false);
     render();
     replayUpdateUI();
@@ -2135,10 +2498,23 @@ els.replayDropzone.addEventListener("drop", async (event) => {
     els.replayDropzone.classList.remove("dragover");
     await handleSelectedFiles(Array.from(event.dataTransfer?.files || []));
 });
+els.agentModalClose.addEventListener("click", closeAgentModal);
+els.agentModalBackdrop.addEventListener("click", closeAgentModal);
+els.agentModal.addEventListener("click", (event) => {
+    if (event.target === els.agentModal) {
+        closeAgentModal();
+    }
+});
 els.svg.addEventListener("click", (e) => {
     if (!e.target.closest(".node")) {
         state.selectedId = null;
         render();
+    }
+});
+
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.agentModal.classList.contains("hidden")) {
+        closeAgentModal();
     }
 });
 

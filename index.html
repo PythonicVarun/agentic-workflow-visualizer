@@ -197,6 +197,28 @@
                                     No spawn prompt captured.
                                 </p>
                             </div>
+                            <section class="tool-history-section">
+                                <div class="tool-history-header">
+                                    <span class="tool-history-title"
+                                        >Tool Activity</span
+                                    >
+                                    <span
+                                        class="tool-history-count"
+                                        id="selected-tool-history-count"
+                                        >0</span
+                                    >
+                                </div>
+                                <div
+                                    id="selected-tool-history-empty"
+                                    class="tool-history-empty"
+                                >
+                                    No tool activity captured yet.
+                                </div>
+                                <div
+                                    id="selected-tool-history"
+                                    class="tool-history-list"
+                                ></div>
+                            </section>
                         </div>
                     </section>
 
@@ -528,6 +550,96 @@
                     </section>
                 </aside>
             </main>
+        </div>
+        <div class="agent-modal hidden" id="agent-modal" aria-hidden="true">
+            <div class="agent-modal-backdrop" id="agent-modal-backdrop"></div>
+            <section
+                class="agent-modal-dialog"
+                id="agent-modal-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="agent-modal-title"
+            >
+                <div class="agent-modal-header">
+                    <div class="agent-modal-title-wrap">
+                        <h2 id="agent-modal-title">Agent Details</h2>
+                        <p class="agent-modal-subtitle" id="agent-modal-subtitle">
+                            Click an agent to inspect its full activity.
+                        </p>
+                    </div>
+                    <button
+                        class="agent-modal-close"
+                        id="agent-modal-close"
+                        type="button"
+                        aria-label="Close agent details"
+                    >
+                        <svg
+                            viewBox="0 0 20 20"
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                        >
+                            <line x1="5" y1="5" x2="15" y2="15" />
+                            <line x1="15" y1="5" x2="5" y2="15" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="agent-modal-body">
+                    <dl class="agent-modal-stats">
+                        <div>
+                            <dt>Role</dt>
+                            <dd id="agent-modal-role">agent</dd>
+                        </div>
+                        <div>
+                            <dt>Status</dt>
+                            <dd id="agent-modal-status">pending</dd>
+                        </div>
+                        <div>
+                            <dt>Elapsed</dt>
+                            <dd id="agent-modal-elapsed">0s</dd>
+                        </div>
+                        <div>
+                            <dt>Tools</dt>
+                            <dd id="agent-modal-tools">0</dd>
+                        </div>
+                    </dl>
+                    <div class="agent-modal-section">
+                        <span class="prompt-label">Current Action</span>
+                        <p class="selected-action" id="agent-modal-action">
+                            Waiting
+                        </p>
+                    </div>
+                    <div class="prompt-card">
+                        <span class="prompt-label">Spawn Prompt</span>
+                        <p class="selected-prompt" id="agent-modal-prompt">
+                            No spawn prompt captured.
+                        </p>
+                    </div>
+                    <section class="tool-history-section">
+                        <div class="tool-history-header">
+                            <span class="tool-history-title">Tool Activity</span>
+                            <span
+                                class="tool-history-count"
+                                id="agent-modal-tool-history-count"
+                                >0</span
+                            >
+                        </div>
+                        <div
+                            id="agent-modal-tool-history-empty"
+                            class="tool-history-empty"
+                        >
+                            No tool activity captured yet.
+                        </div>
+                        <div
+                            id="agent-modal-tool-history"
+                            class="tool-history-list"
+                        ></div>
+                    </section>
+                </div>
+            </section>
         </div>
         <script type="module" src="./graph.js"></script>
     </body>
