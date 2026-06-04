@@ -17,6 +17,7 @@ const state = {
     connected: false,
     backendAvailable: false,
     modalNodeId: null,
+    modalRenderKey: null,
     liveDetailSequence: null,
     liveDetailSyncing: false,
     configModalOpen: false,
@@ -688,9 +689,22 @@ function persistLLMConfig(config) {
 function loadAgentSummaries() {
     const raw = safeLocalStorageGet(AGENT_SUMMARY_STORAGE_KEY);
     const parsed = safeJsonParse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed
-        : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+    }
+    const cleaned = Object.fromEntries(
+        Object.entries(parsed).filter(([, summary]) => {
+            const signature = String(summary?.signature || "");
+            return /^sig_[0-9a-f]{8}$/.test(signature);
+        }),
+    );
+    if (Object.keys(cleaned).length !== Object.keys(parsed).length) {
+        safeLocalStorageSet(
+            AGENT_SUMMARY_STORAGE_KEY,
+            JSON.stringify(cleaned),
+        );
+    }
+    return cleaned;
 }
 
 function persistAgentSummaries() {
@@ -712,13 +726,17 @@ function maskSecret(value) {
 }
 
 function sanitizeSummaryName(value, fallback) {
-    const text = trim(String(value || "").replace(/^["']|["']$/g, ""), 42);
+    const cleaned = String(value || "").replace(/^["']|["']$/g, "").trim();
+    const compact = cleaned.replace(/\s+/g, " ");
+    const words = compact.split(" ").filter(Boolean).slice(0, 3);
+    const text = trim(words.join(" "), 42);
     return text || trim(fallback, 42);
 }
 
 function sanitizeSummaryDescription(value, fallback) {
-    const text = trim(String(value || "").replace(/\s+/g, " "), 150);
-    return text || trim(fallback, 150);
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    const fallbackText = String(fallback || "").replace(/\s+/g, " ").trim();
+    return text || fallbackText;
 }
 
 function fallbackNodeName(node) {
@@ -730,11 +748,21 @@ function fallbackNodeName(node) {
 }
 
 function fallbackNodeDescription(node) {
-    const fallback =
-        node?.spawn_prompt ||
-        node?.last_action ||
-        `${humanize(node?.role || "agent")} task in progress.`;
+    const fallback = node?.spawn_prompt
+        ? trim(node.spawn_prompt, 120)
+        : node?.last_action ||
+          `${humanize(node?.role || "agent")} task in progress.`;
     return sanitizeSummaryDescription(fallback, "No task summary available yet.");
+}
+
+function hashString(value) {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `sig_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function buildNodeSummarySignature(node) {
@@ -749,7 +777,7 @@ function buildNodeSummarySignature(node) {
             ].join("|"),
         )
         .join("||");
-    return JSON.stringify({
+    const signatureSource = JSON.stringify({
         id: node.id,
         label: node.label,
         role: node.role,
@@ -761,6 +789,7 @@ function buildNodeSummarySignature(node) {
         toolCount: node.tool_count,
         eventCount: node.event_count,
     });
+    return hashString(signatureSource);
 }
 
 function getNodeSummaryEntry(node) {
@@ -825,6 +854,7 @@ function setSummaryBadge(element, status) {
 
 function summaryCanBeGenerated(node) {
     if (!node) return false;
+    if (!["complete", "failed"].includes(node.status)) return false;
     return Boolean(
         node.spawn_prompt ||
             (node.last_action && node.last_action !== "Waiting") ||
@@ -848,9 +878,11 @@ function enqueueNodeSummary(node) {
     state.summaryQueue.push({ nodeId: node.id, signature });
 }
 
-function queueVisibleNodeSummaries() {
+function queueCompletedAgentSummaries() {
     if (!hasLLMConfig()) return;
-    (state.graph.nodes || []).forEach((node) => enqueueNodeSummary(node));
+    (state.graph.nodes || [])
+        .filter((node) => ["complete", "failed"].includes(node.status))
+        .forEach((node) => enqueueNodeSummary(node));
     void processSummaryQueue();
 }
 
@@ -866,10 +898,57 @@ function llmContentText(content) {
 
 function parseSummaryPayload(content) {
     const direct = safeJsonParse(content);
+    if (Array.isArray(direct)) {
+        return direct.find(
+            (item) =>
+                item &&
+                typeof item === "object" &&
+                !Array.isArray(item) &&
+                (item.name || item.description),
+        );
+    }
     if (direct && typeof direct === "object") return direct;
-    const match = String(content || "").match(/\{[\s\S]*\}/);
-    const extracted = match ? safeJsonParse(match[0]) : null;
-    return extracted && typeof extracted === "object" ? extracted : null;
+    const text = String(content || "");
+    const arrayMatch = text.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+        const extractedArray = safeJsonParse(arrayMatch[0]);
+        if (Array.isArray(extractedArray)) {
+            return extractedArray.find(
+                (item) =>
+                    item &&
+                    typeof item === "object" &&
+                    !Array.isArray(item) &&
+                    (item.name || item.description),
+            );
+        }
+    }
+    const objectMatch = text.match(/\{[\s\S]*\}/);
+    const extractedObject = objectMatch ? safeJsonParse(objectMatch[0]) : null;
+    return extractedObject &&
+        typeof extractedObject === "object" &&
+        !Array.isArray(extractedObject)
+        ? extractedObject
+        : null;
+}
+
+function normalizeComparableName(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+
+function mirrorsExistingAgentLabel(node, name) {
+    const candidate = normalizeComparableName(name);
+    if (!candidate) return false;
+    const existingNames = [
+        node?.label,
+        node?.nickname,
+        humanize(node?.id),
+    ]
+        .map((value) => normalizeComparableName(value))
+        .filter(Boolean);
+    return existingNames.includes(candidate);
 }
 
 function buildSummaryRequestContext(node) {
@@ -883,7 +962,8 @@ function buildSummaryRequestContext(node) {
         .join("\n");
     return [
         `Agent id: ${node.id}`,
-        `Current label: ${node.label || "none"}`,
+        `Existing UI label for reference only: ${node.label || "none"}`,
+        `Existing nickname for reference only: ${node.nickname || "none"}`,
         `Role: ${node.role || "agent"}`,
         `Status: ${node.status || "pending"}`,
         `Spawn prompt: ${node.spawn_prompt || "none"}`,
@@ -894,7 +974,7 @@ function buildSummaryRequestContext(node) {
     ].join("\n");
 }
 
-async function requestNodeSummary(node) {
+async function requestNodeSummaryAttempt(node, retryMode = false) {
     const { baseUrl, apiKey, model } = state.llmConfig;
     const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
@@ -909,7 +989,9 @@ async function requestNodeSummary(node) {
                 {
                     role: "system",
                     content:
-                        "You label software agents by the task they actually performed. Return strict JSON with keys name and description. The name should be concise and natural. The description should be one short sentence describing what the agent did.",
+                        retryMode
+                            ? "You label software agents by the task they actually performed. Your previous answer reused the existing agent label, which is incorrect. Return only strict JSON as a single object with exactly two top-level keys: name and description. The name must describe the completed task, must not repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id, and must be short: 1 to 3 words only. Do not wrap the object in markdown. Do not add commentary. Do not return an array. If you were about to return a list, return only the best single object instead. The description should be one short sentence describing what the agent did."
+                            : "You label software agents by the task they actually performed. Return only strict JSON as a single object with exactly two top-level keys: name and description. The name must describe the completed task, must not repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id, and must be short: 1 to 3 words only. Do not wrap the object in markdown. Do not add commentary. Do not return an array. If you were about to return a list, return only the best single object instead. The description should be one short sentence describing what the agent did.",
                 },
                 {
                     role: "user",
@@ -941,6 +1023,22 @@ async function requestNodeSummary(node) {
             fallbackNodeDescription(node),
         ),
     };
+}
+
+async function requestNodeSummary(node) {
+    const first = await requestNodeSummaryAttempt(node, false);
+    if (!mirrorsExistingAgentLabel(node, first.name)) {
+        return first;
+    }
+
+    const second = await requestNodeSummaryAttempt(node, true);
+    if (!mirrorsExistingAgentLabel(node, second.name)) {
+        return second;
+    }
+
+    throw new Error(
+        "LLM summary name mirrored the existing agent label instead of the completed task.",
+    );
 }
 
 async function processSummaryQueue() {
@@ -2129,9 +2227,40 @@ function getNodeToolRuns(node) {
     });
 }
 
+function wrapNodeText(text, maxChars = 34) {
+    const words = String(text || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(" ")
+        .filter(Boolean);
+    if (!words.length) return [];
+    const lines = [];
+    let current = words[0];
+    for (let index = 1; index < words.length; index += 1) {
+        const next = `${current} ${words[index]}`;
+        if (next.length <= maxChars) {
+            current = next;
+        } else {
+            lines.push(current);
+            current = words[index];
+        }
+    }
+    lines.push(current);
+    return lines;
+}
+
+function getTerminalNodeDescriptionLines(node) {
+    const presentation = getNodePresentation(node);
+    return wrapNodeText(presentation.description, 34);
+}
+
 function getNodeHeight(node) {
     const presentation = getNodePresentation(node);
-    return presentation.description.length > 92 ? 132 : 122;
+    const lines = Math.max(1, wrapNodeText(presentation.description, 34).length);
+    if (["complete", "failed"].includes(node?.status)) {
+        return Math.max(122, 96 + lines * 16);
+    }
+    return Math.max(122, 116 + Math.max(0, lines - 1) * 16);
 }
 
 function createToolHistoryCard(run) {
@@ -2202,6 +2331,7 @@ function renderToolHistory(container, emptyEl, countEl, node) {
 
 function closeAgentModal() {
     state.modalNodeId = null;
+    state.modalRenderKey = null;
     els.agentModal.classList.add("hidden");
     els.agentModal.setAttribute("aria-hidden", "true");
 }
@@ -2223,10 +2353,39 @@ function closeConfigModal() {
     els.configModal.setAttribute("aria-hidden", "true");
 }
 
+function buildAgentModalRenderKey(node) {
+    const presentation = getNodePresentation(node);
+    return JSON.stringify({
+        id: node?.id,
+        label: node?.label,
+        role: node?.role,
+        status: node?.status,
+        toolCount: node?.tool_count,
+        lastAction: node?.last_action,
+        prompt: node?.spawn_prompt,
+        summaryName: presentation.name,
+        summaryDescription: presentation.description,
+        summaryStatus: presentation.status,
+        runs: getNodeToolRuns(node).map((run) => [
+            run.id,
+            run.status,
+            run.sequence,
+            summarize(run.input, 80),
+            summarize(run.output, 80),
+        ]),
+    });
+}
+
 function openAgentModal(node) {
     if (!node) return;
     const presentation = getNodePresentation(node);
+    const nextRenderKey = buildAgentModalRenderKey(node);
+    const isAlreadyOpen = !els.agentModal.classList.contains("hidden");
     state.modalNodeId = node.id;
+    if (isAlreadyOpen && state.modalRenderKey === nextRenderKey) {
+        return;
+    }
+    state.modalRenderKey = nextRenderKey;
     els.agentModalTitle.textContent = presentation.name || "Agent Details";
     const subtitleParts = [trim(node.id, 44), node.role || "agent"];
     if (node.label && node.label !== presentation.name) {
@@ -2390,9 +2549,27 @@ function nodeText(group, attrs, text) {
     createSvg("text", attrs, group).textContent = text;
 }
 
+function nodeMultilineText(group, attrs, lines, lineHeight = 15) {
+    const text = createSvg("text", attrs, group);
+    lines.forEach((line, index) => {
+        const span = createSvg(
+            "tspan",
+            {
+                x: attrs.x,
+                dy: index === 0 ? 0 : lineHeight,
+            },
+            text,
+        );
+        span.textContent = line;
+    });
+    return text;
+}
+
 function drawNode(node, box) {
     const presentation = getNodePresentation(node);
     const status = normalizeStatus(node.status);
+    const isTerminal = ["complete", "failed"].includes(status);
+    const descriptionLines = wrapNodeText(presentation.description, 34);
     const group = createSvg("g", {
         class: `node ${status}${node.id === state.selectedId ? " selected" : ""}`,
         transform: `translate(${box.x}, ${box.y})`,
@@ -2434,16 +2611,30 @@ function drawNode(node, box) {
         { class: "node-meta", x: 18, y: 48 },
         `${trim(node.role || "agent", 22)} | ${formatElapsed(node.elapsed_seconds)}`,
     );
-    nodeText(
-        group,
-        { class: "node-summary", x: 18, y: 72 },
-        trim(presentation.description, 42),
-    );
-    nodeText(
-        group,
-        { class: "node-action", x: 18, y: 94 },
-        trim(node.last_action, 42),
-    );
+    if (isTerminal) {
+        nodeMultilineText(
+            group,
+            { class: "node-summary", x: 18, y: 72 },
+            descriptionLines,
+            15,
+        );
+    } else {
+        nodeMultilineText(
+            group,
+            { class: "node-summary", x: 18, y: 72 },
+            descriptionLines,
+            15,
+        );
+        nodeText(
+            group,
+            {
+                class: "node-action",
+                x: 18,
+                y: 94 + Math.max(0, descriptionLines.length - 1) * 15,
+            },
+            trim(node.last_action, 42),
+        );
+    }
 
     const pillWidth = 72;
     const pillX = box.width - pillWidth - 12;
@@ -2697,7 +2888,6 @@ function render() {
             closeAgentModal();
         }
     }
-    queueVisibleNodeSummaries();
 }
 
 async function syncLiveDetailedGraph(graph) {
@@ -2725,6 +2915,7 @@ async function syncLiveDetailedGraph(graph) {
         state.graph = buildGraphFromEvents(events, details);
         state.liveDetailSequence = graph.sequence;
         render();
+        queueCompletedAgentSummaries();
     } catch {
         // Keep the backend summary graph if the current log cannot be reloaded.
     } finally {
@@ -2753,6 +2944,7 @@ async function loadState() {
         setConnection(false);
     }
     render();
+    queueCompletedAgentSummaries();
     if (state.backendAvailable && !graphHasDetailedTools(state.graph)) {
         void syncLiveDetailedGraph(state.graph);
     }
@@ -2764,6 +2956,7 @@ function handleSse(event) {
     if (payload.state) {
         state.graph = payload.state;
         render();
+        queueCompletedAgentSummaries();
         if (!graphHasDetailedTools(state.graph)) {
             void syncLiveDetailedGraph(payload.state);
         } else {
@@ -2826,6 +3019,7 @@ function saveLLMConfigFromForm(event) {
     state.llmStatus = `Saved locally. Using ${nextConfig.model} at ${nextConfig.baseUrl}.`;
     closeConfigModal();
     render();
+    queueCompletedAgentSummaries();
 }
 
 function clearSavedLLMConfig() {
@@ -2865,10 +3059,13 @@ const replay = {
 };
 
 function replayFormatTime(date) {
-    const h = String(date.getHours()).padStart(2, "0");
-    const m = String(date.getMinutes()).padStart(2, "0");
-    const s = String(date.getSeconds()).padStart(2, "0");
-    return `${h}:${m}:${s}`;
+    return date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
 }
 
 function replayFormatDuration(ms) {
@@ -2887,6 +3084,7 @@ function replayBuildAndRender() {
     state.graph = buildGraphFromEvents(eventsToPlay, replay.logDetails);
     state.selectedId = state.selectedId || ROOT_AGENT_ID;
     render();
+    queueCompletedAgentSummaries();
 }
 
 function replayUpdateUI() {
