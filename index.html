@@ -23,6 +23,9 @@
                         <span id="connection-text">Connecting</span>
                     </div>
                     <div class="log-status" id="log-status">Live log</div>
+                    <button id="llm-config-button" type="button">
+                        Configure LLM
+                    </button>
                     <a
                         id="download-log"
                         class="button-link"
@@ -191,6 +194,23 @@
                             <p id="selected-action" class="selected-action">
                                 Waiting
                             </p>
+                            <div class="summary-card">
+                                <div class="summary-card-head">
+                                    <span class="prompt-label">Task Summary</span>
+                                    <span
+                                        class="summary-badge pending"
+                                        id="selected-summary-badge"
+                                        >pending</span
+                                    >
+                                </div>
+                                <p
+                                    id="selected-summary-description"
+                                    class="summary-description"
+                                >
+                                    Configure an LLM to generate a readable task
+                                    summary for this agent.
+                                </p>
+                            </div>
                             <div class="prompt-card">
                                 <span class="prompt-label">Spawn Prompt</span>
                                 <p id="selected-prompt" class="selected-prompt">
@@ -286,13 +306,7 @@
                                     Choose Sessions Folder
                                 </button>
                             </div>
-                            <p class="replay-dropnote">
-                                Load files from
-                                `%USERPROFILE%\.codex\sessions`. Primary
-                                sessions are listed here; matching sub-agent
-                                logs stay hidden and are merged into the replay
-                                automatically.
-                            </p>
+                            <p class="replay-dropnote" id="replay-dropnote"></p>
                             <input
                                 id="replay-file"
                                 type="file"
@@ -333,7 +347,9 @@
                                     >
                                         <path d="M2 3h12M2 8h12M2 13h12" />
                                     </svg>
-                                    <span>Codex Sessions</span>
+                                    <span id="session-library-title">
+                                        Files in Logs
+                                    </span>
                                     <span
                                         class="demo-logs-count session-library-count"
                                         id="session-library-count"
@@ -612,6 +628,23 @@
                             Waiting
                         </p>
                     </div>
+                    <div class="summary-card">
+                        <div class="summary-card-head">
+                            <span class="prompt-label">Task Summary</span>
+                            <span
+                                class="summary-badge pending"
+                                id="agent-modal-summary-badge"
+                                >pending</span
+                            >
+                        </div>
+                        <p
+                            class="summary-description"
+                            id="agent-modal-summary-description"
+                        >
+                            Configure an LLM to generate a readable task summary
+                            for this agent.
+                        </p>
+                    </div>
                     <div class="prompt-card">
                         <span class="prompt-label">Spawn Prompt</span>
                         <p class="selected-prompt" id="agent-modal-prompt">
@@ -639,6 +672,97 @@
                         ></div>
                     </section>
                 </div>
+            </section>
+        </div>
+        <div class="config-modal hidden" id="config-modal" aria-hidden="true">
+            <div class="agent-modal-backdrop" id="config-modal-backdrop"></div>
+            <section
+                class="config-modal-dialog"
+                id="config-modal-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="config-modal-title"
+            >
+                <div class="agent-modal-header">
+                    <div class="agent-modal-title-wrap">
+                        <h2 id="config-modal-title">LLM Configuration</h2>
+                        <p class="agent-modal-subtitle">
+                            Saved only in this browser. The configured endpoint
+                            must expose an OpenAI-compatible
+                            `/chat/completions` route and allow browser
+                            requests.
+                        </p>
+                    </div>
+                    <button
+                        class="agent-modal-close"
+                        id="config-modal-close"
+                        type="button"
+                        aria-label="Close LLM configuration"
+                    >
+                        <svg
+                            viewBox="0 0 20 20"
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                        >
+                            <line x1="5" y1="5" x2="15" y2="15" />
+                            <line x1="15" y1="5" x2="5" y2="15" />
+                        </svg>
+                    </button>
+                </div>
+                <form class="config-form" id="llm-config-form">
+                    <label class="config-field" for="llm-base-url">
+                        <span class="config-label">Base URL</span>
+                        <input
+                            id="llm-base-url"
+                            name="baseUrl"
+                            class="config-input"
+                            type="url"
+                            placeholder="https://api.openai.com/v1"
+                            autocomplete="url"
+                        />
+                    </label>
+                    <label class="config-field" for="llm-api-key">
+                        <span class="config-label">API Key</span>
+                        <input
+                            id="llm-api-key"
+                            name="apiKey"
+                            class="config-input"
+                            type="password"
+                            placeholder="sk-..."
+                            autocomplete="current-password"
+                        />
+                    </label>
+                    <label class="config-field" for="llm-model">
+                        <span class="config-label">Model</span>
+                        <input
+                            id="llm-model"
+                            name="model"
+                            class="config-input"
+                            type="text"
+                            placeholder="gpt-4.1-mini"
+                            autocomplete="off"
+                        />
+                    </label>
+                    <p class="config-status" id="llm-config-status">
+                        No LLM credentials saved yet.
+                    </p>
+                    <div class="config-actions">
+                        <button
+                            id="llm-config-clear"
+                            type="button"
+                            class="secondary-button"
+                        >
+                            Clear Saved Credentials
+                        </button>
+                        <button id="llm-config-save" type="submit">
+                            Save Configuration
+                        </button>
+                    </div>
+                </form>
             </section>
         </div>
         <script type="module" src="./graph.js"></script>

@@ -1,6 +1,8 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_EVENT_HISTORY = 80;
 const ROOT_AGENT_ID = "primary_agent";
+const LLM_CONFIG_STORAGE_KEY = "awv-llm-config";
+const AGENT_SUMMARY_STORAGE_KEY = "awv-agent-summaries";
 
 const state = {
     graph: {
@@ -17,12 +19,22 @@ const state = {
     modalNodeId: null,
     liveDetailSequence: null,
     liveDetailSyncing: false,
+    configModalOpen: false,
+    llmConfig: loadLLMConfig(),
+    agentSummaries: loadAgentSummaries(),
+    summaryQueue: [],
+    summaryInflight: new Set(),
+    summaryProcessing: false,
+    llmStatus: "",
 };
 
 const sessionLibrary = {
     loaded: false,
+    mode: "files",
     selectedSessionId: null,
+    selectedFileId: null,
     sessions: [],
+    files: [],
     sessionMap: new Map(),
     childMap: new Map(),
 };
@@ -45,6 +57,7 @@ const els = {
     replayFolder: document.querySelector("#replay-folder"),
     pickLogFiles: document.querySelector("#pick-log-files"),
     pickLogFolder: document.querySelector("#pick-log-folder"),
+    replayDropnote: document.querySelector("#replay-dropnote"),
     feed: document.querySelector("#event-feed"),
     selectedTitle: document.querySelector("#selected-title"),
     selectedStatus: document.querySelector("#selected-status"),
@@ -52,6 +65,10 @@ const els = {
     selectedElapsed: document.querySelector("#selected-elapsed"),
     selectedTools: document.querySelector("#selected-tools"),
     selectedAction: document.querySelector("#selected-action"),
+    selectedSummaryBadge: document.querySelector("#selected-summary-badge"),
+    selectedSummaryDescription: document.querySelector(
+        "#selected-summary-description",
+    ),
     selectedPrompt: document.querySelector("#selected-prompt"),
     selectedToolHistory: document.querySelector("#selected-tool-history"),
     selectedToolHistoryCount: document.querySelector(
@@ -74,6 +91,10 @@ const els = {
     agentModalElapsed: document.querySelector("#agent-modal-elapsed"),
     agentModalTools: document.querySelector("#agent-modal-tools"),
     agentModalAction: document.querySelector("#agent-modal-action"),
+    agentModalSummaryBadge: document.querySelector("#agent-modal-summary-badge"),
+    agentModalSummaryDescription: document.querySelector(
+        "#agent-modal-summary-description",
+    ),
     agentModalPrompt: document.querySelector("#agent-modal-prompt"),
     agentModalToolHistory: document.querySelector("#agent-modal-tool-history"),
     agentModalToolHistoryCount: document.querySelector(
@@ -86,6 +107,18 @@ const els = {
     zoomOut: document.querySelector("#zoom-out"),
     zoomFit: document.querySelector("#zoom-fit"),
     zoomLevel: document.querySelector("#zoom-level"),
+    llmConfigButton: document.querySelector("#llm-config-button"),
+    configModal: document.querySelector("#config-modal"),
+    configModalBackdrop: document.querySelector("#config-modal-backdrop"),
+    configModalDialog: document.querySelector("#config-modal-dialog"),
+    configModalClose: document.querySelector("#config-modal-close"),
+    llmConfigForm: document.querySelector("#llm-config-form"),
+    llmBaseUrl: document.querySelector("#llm-base-url"),
+    llmApiKey: document.querySelector("#llm-api-key"),
+    llmModel: document.querySelector("#llm-model"),
+    llmConfigStatus: document.querySelector("#llm-config-status"),
+    llmConfigSave: document.querySelector("#llm-config-save"),
+    llmConfigClear: document.querySelector("#llm-config-clear"),
 
     // Replay player elements
     replayPlayer: document.querySelector("#replay-player"),
@@ -103,6 +136,7 @@ const els = {
     // Session library elements
     sessionLibrarySection: document.querySelector("#session-library-section"),
     sessionLibraryToggle: document.querySelector("#session-library-toggle"),
+    sessionLibraryTitle: document.querySelector("#session-library-title"),
     sessionLibraryCount: document.querySelector("#session-library-count"),
     sessionLibraryList: document.querySelector("#session-library-list"),
     sessionLibraryEmpty: document.querySelector("#session-library-empty"),
@@ -587,6 +621,9 @@ function setConnection(connected) {
     state.connected = connected;
     els.connection.classList.toggle("connected", connected);
     els.connection.classList.toggle("disconnected", !connected);
+    const isStaticReplay = !connected && !state.backendAvailable;
+    els.downloadLog.style.display = isStaticReplay ? "none" : "";
+    els.demoButton.style.display = isStaticReplay ? "none" : "";
     if (connected) {
         els.connectionText.textContent = "Live";
         return;
@@ -600,6 +637,358 @@ function normalizeStatus(status) {
     return ["pending", "running", "complete", "failed"].includes(status)
         ? status
         : "pending";
+}
+
+function safeLocalStorageGet(key) {
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function safeLocalStorageSet(key, value) {
+    try {
+        window.localStorage.setItem(key, value);
+    } catch {
+        // Ignore storage failures in private or restricted contexts.
+    }
+}
+
+function safeLocalStorageRemove(key) {
+    try {
+        window.localStorage.removeItem(key);
+    } catch {
+        // Ignore storage failures in private or restricted contexts.
+    }
+}
+
+function normalizeLLMConfig(config = {}) {
+    const baseUrl = String(config.baseUrl || "")
+        .trim()
+        .replace(/\/+$/, "");
+    const apiKey = String(config.apiKey || "").trim();
+    const model = String(config.model || "").trim();
+    return { baseUrl, apiKey, model };
+}
+
+function loadLLMConfig() {
+    const raw = safeLocalStorageGet(LLM_CONFIG_STORAGE_KEY);
+    const parsed = safeJsonParse(raw);
+    return normalizeLLMConfig(parsed || {});
+}
+
+function persistLLMConfig(config) {
+    safeLocalStorageSet(
+        LLM_CONFIG_STORAGE_KEY,
+        JSON.stringify(normalizeLLMConfig(config)),
+    );
+}
+
+function loadAgentSummaries() {
+    const raw = safeLocalStorageGet(AGENT_SUMMARY_STORAGE_KEY);
+    const parsed = safeJsonParse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : {};
+}
+
+function persistAgentSummaries() {
+    safeLocalStorageSet(
+        AGENT_SUMMARY_STORAGE_KEY,
+        JSON.stringify(state.agentSummaries),
+    );
+}
+
+function hasLLMConfig(config = state.llmConfig) {
+    return Boolean(config?.baseUrl && config?.apiKey && config?.model);
+}
+
+function maskSecret(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (text.length <= 8) return `${text.slice(0, 2)}...${text.slice(-2)}`;
+    return `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
+function sanitizeSummaryName(value, fallback) {
+    const text = trim(String(value || "").replace(/^["']|["']$/g, ""), 42);
+    return text || trim(fallback, 42);
+}
+
+function sanitizeSummaryDescription(value, fallback) {
+    const text = trim(String(value || "").replace(/\s+/g, " "), 150);
+    return text || trim(fallback, 150);
+}
+
+function fallbackNodeName(node) {
+    const base =
+        node?.label ||
+        node?.nickname ||
+        (node?.role ? `${humanize(node.role)} Agent` : humanize(node?.id));
+    return sanitizeSummaryName(base, "Agent");
+}
+
+function fallbackNodeDescription(node) {
+    const fallback =
+        node?.spawn_prompt ||
+        node?.last_action ||
+        `${humanize(node?.role || "agent")} task in progress.`;
+    return sanitizeSummaryDescription(fallback, "No task summary available yet.");
+}
+
+function buildNodeSummarySignature(node) {
+    if (!node?.id) return "";
+    const tools = getNodeToolRuns(node)
+        .slice(0, 6)
+        .map((run) =>
+            [
+                run.tool_name || "tool",
+                summarize(run.input, 70),
+                summarize(run.output, 70),
+            ].join("|"),
+        )
+        .join("||");
+    return JSON.stringify({
+        id: node.id,
+        label: node.label,
+        role: node.role,
+        status: node.status,
+        prompt: node.spawn_prompt,
+        action: node.last_action,
+        model: node.model,
+        tools,
+        toolCount: node.tool_count,
+        eventCount: node.event_count,
+    });
+}
+
+function getNodeSummaryEntry(node) {
+    if (!node?.id) return null;
+    const summary = state.agentSummaries[node.id];
+    if (!summary) return null;
+    return summary.signature === buildNodeSummarySignature(node) ? summary : null;
+}
+
+function getNodePresentation(node) {
+    const summary = getNodeSummaryEntry(node);
+    if (summary?.status === "ready") {
+        return {
+            name: sanitizeSummaryName(summary.name, fallbackNodeName(node)),
+            description: sanitizeSummaryDescription(
+                summary.description,
+                fallbackNodeDescription(node),
+            ),
+            status: "ready",
+        };
+    }
+    if (summary?.status === "error") {
+        return {
+            name: fallbackNodeName(node),
+            description: sanitizeSummaryDescription(
+                summary.error,
+                "Summary generation failed for this agent.",
+            ),
+            status: "error",
+        };
+    }
+    if (state.summaryInflight.has(node?.id)) {
+        return {
+            name: fallbackNodeName(node),
+            description: "Generating an LLM task summary for this agent.",
+            status: "pending",
+        };
+    }
+    if (!hasLLMConfig()) {
+        return {
+            name: fallbackNodeName(node),
+            description:
+                "Configure an LLM to generate a readable task summary for this agent.",
+            status: "pending",
+        };
+    }
+    return {
+        name: fallbackNodeName(node),
+        description: fallbackNodeDescription(node),
+        status: "pending",
+    };
+}
+
+function setSummaryBadge(element, status) {
+    if (!element) return;
+    const normalized =
+        status === "ready" || status === "error" ? status : "pending";
+    element.classList.remove("pending", "ready", "error");
+    element.classList.add(normalized);
+    element.textContent = normalized;
+}
+
+function summaryCanBeGenerated(node) {
+    if (!node) return false;
+    return Boolean(
+        node.spawn_prompt ||
+            (node.last_action && node.last_action !== "Waiting") ||
+            node.tool_count ||
+            node.event_count > 1,
+    );
+}
+
+function enqueueNodeSummary(node) {
+    if (!hasLLMConfig() || !summaryCanBeGenerated(node)) return;
+    const signature = buildNodeSummarySignature(node);
+    if (!signature) return;
+    const existing = state.agentSummaries[node.id];
+    if (existing?.signature === signature && existing.status === "ready") return;
+    if (existing?.signature === signature && existing.status === "error") return;
+    if (state.summaryInflight.has(node.id)) return;
+    const queued = state.summaryQueue.some(
+        (item) => item.nodeId === node.id && item.signature === signature,
+    );
+    if (queued) return;
+    state.summaryQueue.push({ nodeId: node.id, signature });
+}
+
+function queueVisibleNodeSummaries() {
+    if (!hasLLMConfig()) return;
+    (state.graph.nodes || []).forEach((node) => enqueueNodeSummary(node));
+    void processSummaryQueue();
+}
+
+function llmContentText(content) {
+    if (typeof content === "string") return content.trim();
+    if (!Array.isArray(content)) return "";
+    return content
+        .map((item) => item?.text || item?.value || "")
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+}
+
+function parseSummaryPayload(content) {
+    const direct = safeJsonParse(content);
+    if (direct && typeof direct === "object") return direct;
+    const match = String(content || "").match(/\{[\s\S]*\}/);
+    const extracted = match ? safeJsonParse(match[0]) : null;
+    return extracted && typeof extracted === "object" ? extracted : null;
+}
+
+function buildSummaryRequestContext(node) {
+    const toolText = getNodeToolRuns(node)
+        .slice(0, 6)
+        .map((run, index) => {
+            const input = summarize(run.input, 120) || "none";
+            const output = summarize(run.output, 120) || "pending";
+            return `${index + 1}. ${run.tool_name || "tool"} | input: ${input} | output: ${output}`;
+        })
+        .join("\n");
+    return [
+        `Agent id: ${node.id}`,
+        `Current label: ${node.label || "none"}`,
+        `Role: ${node.role || "agent"}`,
+        `Status: ${node.status || "pending"}`,
+        `Spawn prompt: ${node.spawn_prompt || "none"}`,
+        `Latest action: ${node.last_action || "none"}`,
+        `Model: ${node.model || "unknown"}`,
+        `Tool count: ${node.tool_count || 0}`,
+        `Observed tools:\n${toolText || "none"}`,
+    ].join("\n");
+}
+
+async function requestNodeSummary(node) {
+    const { baseUrl, apiKey, model } = state.llmConfig;
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            model,
+            temperature: 0.2,
+            messages: [
+                {
+                    role: "system",
+                    content:
+                        "You label software agents by the task they actually performed. Return strict JSON with keys name and description. The name should be concise and natural. The description should be one short sentence describing what the agent did.",
+                },
+                {
+                    role: "user",
+                    content: buildSummaryRequestContext(node),
+                },
+            ],
+        }),
+    });
+
+    if (!response.ok) {
+        const detail = trim(await response.text(), 180);
+        throw new Error(detail || `LLM request failed with ${response.status}.`);
+    }
+
+    const payload = await response.json();
+    const choice = payload?.choices?.[0];
+    const content =
+        llmContentText(choice?.message?.content) ||
+        String(choice?.message?.content || choice?.text || "").trim();
+    const parsed = parseSummaryPayload(content);
+    if (!parsed) {
+        throw new Error("LLM response did not contain valid JSON.");
+    }
+
+    return {
+        name: sanitizeSummaryName(parsed.name, fallbackNodeName(node)),
+        description: sanitizeSummaryDescription(
+            parsed.description,
+            fallbackNodeDescription(node),
+        ),
+    };
+}
+
+async function processSummaryQueue() {
+    if (state.summaryProcessing || !hasLLMConfig()) return;
+    const nextJob = state.summaryQueue.shift();
+    if (!nextJob) return;
+    state.summaryProcessing = true;
+    state.summaryInflight.add(nextJob.nodeId);
+    render();
+
+    try {
+        const node = (state.graph.nodes || []).find(
+            (item) => item.id === nextJob.nodeId,
+        );
+        if (!node) return;
+        const currentSignature = buildNodeSummarySignature(node);
+        if (currentSignature !== nextJob.signature) {
+            enqueueNodeSummary(node);
+            return;
+        }
+        const result = await requestNodeSummary(node);
+        state.agentSummaries[node.id] = {
+            signature: currentSignature,
+            status: "ready",
+            name: result.name,
+            description: result.description,
+            updated_at: isoNow(),
+        };
+        persistAgentSummaries();
+    } catch (error) {
+        state.agentSummaries[nextJob.nodeId] = {
+            signature: nextJob.signature,
+            status: "error",
+            error: trim(
+                error instanceof Error ? error.message : "Summary generation failed.",
+                150,
+            ),
+            updated_at: isoNow(),
+        };
+        persistAgentSummaries();
+    } finally {
+        state.summaryInflight.delete(nextJob.nodeId);
+        state.summaryProcessing = false;
+        render();
+        if (state.summaryQueue.length) {
+            void processSummaryQueue();
+        }
+    }
 }
 
 function createEmptyGraph(log = {}) {
@@ -1110,7 +1499,10 @@ function buildCodexSessionDescriptor(file, entries) {
 
 function rebuildSessionLibrary(descriptors) {
     sessionLibrary.loaded = true;
+    sessionLibrary.mode = "codex";
     sessionLibrary.selectedSessionId = null;
+    sessionLibrary.selectedFileId = null;
+    sessionLibrary.files = [];
     sessionLibrary.sessions = descriptors
         .slice()
         .sort(
@@ -1127,6 +1519,90 @@ function rebuildSessionLibrary(descriptors) {
         existing.push(session.id);
         sessionLibrary.childMap.set(session.parentSessionId, existing);
     });
+}
+
+function rebuildFileLibrary(parsedFiles) {
+    sessionLibrary.loaded = true;
+    sessionLibrary.mode = "files";
+    sessionLibrary.selectedSessionId = null;
+    sessionLibrary.selectedFileId = null;
+    sessionLibrary.sessions = [];
+    sessionLibrary.sessionMap = new Map();
+    sessionLibrary.childMap = new Map();
+    sessionLibrary.files = parsedFiles
+        .map(({ file, text, entries }, index) => {
+            const events = extractEventsFromEntries(entries);
+            const timestamps = events
+                .map((event) => parseDate(event.timestamp).getTime())
+                .filter((value) => Number.isFinite(value));
+            const updatedAt = timestamps.length
+                ? new Date(Math.max(...timestamps)).toISOString()
+                : file.lastModified
+                  ? new Date(file.lastModified).toISOString()
+                  : isoNow();
+            return {
+                id: `file-${index}-${file.name}`,
+                file,
+                text,
+                entries,
+                fileName: file.name,
+                filePath: fileDisplayPath(file),
+                updatedAt,
+                eventCount: events.length,
+                title: file.name,
+            };
+        })
+        .sort(
+            (a, b) =>
+                parseDate(b.updatedAt).getTime() - parseDate(a.updatedAt).getTime(),
+        );
+}
+
+function rebuildIndexedFileLibrary(items) {
+    sessionLibrary.loaded = true;
+    sessionLibrary.mode = "files";
+    sessionLibrary.selectedSessionId = null;
+    sessionLibrary.selectedFileId = null;
+    sessionLibrary.sessions = [];
+    sessionLibrary.sessionMap = new Map();
+    sessionLibrary.childMap = new Map();
+    sessionLibrary.files = items
+        .map((item, index) => {
+            const fileName = basename(item.file || item.path || `log-${index}.jsonl`);
+            return {
+                id: `indexed-file-${index}-${fileName}`,
+                file: null,
+                text: null,
+                entries: null,
+                fileName,
+                filePath: item.file || item.path || fileName,
+                fetchUrl: `./logs/${fileName}`,
+                updatedAt: isoNow(),
+                eventCount: Number(item.events || 0),
+                title: item.title || fileName,
+                description: item.description || "Log file",
+                duration: item.duration || null,
+                agents: Number(item.agents || 0),
+                model: item.model || null,
+            };
+        })
+        .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+async function loadIndexedLogs() {
+    if (sessionLibrary.loaded) return;
+    try {
+        const response = await fetch("./logs/index.json", {
+            cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!Array.isArray(payload) || !payload.length) return;
+        rebuildIndexedFileLibrary(payload);
+        renderSessionLibrary();
+    } catch {
+        // Ignore when no bundled log index is available.
+    }
 }
 
 function primarySessions() {
@@ -1155,20 +1631,25 @@ function renderSessionLibrary() {
     const list = els.sessionLibraryList;
     const empty = els.sessionLibraryEmpty;
     const count = els.sessionLibraryCount;
-    const sessions = primarySessions();
+    const isCodexMode = sessionLibrary.mode === "codex";
+    const sessions = isCodexMode ? primarySessions() : [];
+    const files = isCodexMode ? [] : sessionLibrary.files;
 
-    count.textContent = String(sessions.length);
+    els.sessionLibraryTitle.textContent = isCodexMode
+        ? "Codex Sessions"
+        : "Demo Logs";
+    count.textContent = String(isCodexMode ? sessions.length : files.length);
 
     if (!sessionLibrary.loaded) {
         list.innerHTML = "";
         list.style.display = "none";
         empty.style.display = "";
         empty.textContent =
-            "Load one or more Codex session logs to list the primary sessions.";
+            "Load one or more log files to inspect them here.";
         return;
     }
 
-    if (!sessions.length) {
+    if (isCodexMode && !sessions.length) {
         list.innerHTML = "";
         list.style.display = "none";
         empty.style.display = "";
@@ -1177,9 +1658,89 @@ function renderSessionLibrary() {
         return;
     }
 
+    if (!isCodexMode && !files.length) {
+        list.innerHTML = "";
+        list.style.display = "none";
+        empty.style.display = "";
+        empty.textContent = "No replayable log files were found.";
+        return;
+    }
+
     empty.style.display = "none";
     list.style.display = "";
     list.innerHTML = "";
+
+    if (!isCodexMode) {
+        files.forEach((entry) => {
+            const li = document.createElement("li");
+            li.className = `demo-log-card session-log-card${sessionLibrary.selectedFileId === entry.id ? " is-selected" : ""}`;
+            li.dataset.fileId = entry.id;
+            li.setAttribute("role", "button");
+            li.setAttribute("tabindex", "0");
+
+            const header = document.createElement("div");
+            header.className = "demo-log-header session-log-header";
+
+            const playIcon = document.createElement("span");
+            playIcon.className = "demo-log-play-icon";
+            playIcon.innerHTML =
+                '<svg viewBox="0 0 14 14" width="12" height="12" fill="currentColor"><polygon points="4,2 12,7 4,12"/></svg>';
+
+            const titleWrap = document.createElement("div");
+            titleWrap.className = "session-log-title-wrap";
+
+            const title = document.createElement("span");
+            title.className = "demo-log-title";
+            title.textContent = entry.title;
+
+            const path = document.createElement("span");
+            path.className = "session-log-path";
+            path.textContent = entry.filePath;
+
+            titleWrap.append(title, path);
+            header.append(playIcon, titleWrap);
+            li.appendChild(header);
+
+            const description = document.createElement("p");
+            description.className = "session-log-description";
+            description.textContent =
+                entry.description ||
+                `${entry.eventCount} replay event${entry.eventCount === 1 ? "" : "s"}`;
+            li.appendChild(description);
+
+            const meta = document.createElement("div");
+            meta.className = "demo-log-meta session-log-meta";
+
+            const updated = document.createElement("span");
+            updated.className = "demo-log-pill";
+            updated.textContent =
+                entry.duration || formatDateTime(entry.updatedAt);
+            meta.appendChild(updated);
+
+            if (entry.eventCount) {
+                const eventPill = document.createElement("span");
+                eventPill.className = "demo-log-pill";
+                eventPill.textContent = `${entry.eventCount} event${entry.eventCount === 1 ? "" : "s"}`;
+                meta.appendChild(eventPill);
+            }
+
+            if (entry.agents) {
+                const agentPill = document.createElement("span");
+                agentPill.className = "demo-log-pill";
+                agentPill.textContent = `${entry.agents} agent${entry.agents === 1 ? "" : "s"}`;
+                meta.appendChild(agentPill);
+            }
+
+            const typePill = document.createElement("span");
+            typePill.className = "demo-log-pill model-pill";
+            typePill.textContent = entry.model || "log file";
+            meta.appendChild(typePill);
+
+            li.appendChild(meta);
+            list.appendChild(li);
+        });
+        return;
+    }
 
     sessions.forEach((session) => {
         const li = document.createElement("li");
@@ -1498,7 +2059,28 @@ function replayCodexSession(sessionId) {
     );
 }
 
-async function handleReplaySelection(fileList) {
+function replayFileEntry(fileId) {
+    const entry = sessionLibrary.files.find((item) => item.id === fileId);
+    if (!entry) return;
+    sessionLibrary.selectedFileId = fileId;
+    renderSessionLibrary();
+    if (entry.text) {
+        return replayLogContent(entry.text, entry.fileName);
+    }
+    if (!entry.fetchUrl) {
+        throw new Error(`No replay content is available for ${entry.fileName}.`);
+    }
+    return fetch(entry.fetchUrl, { cache: "no-store" })
+        .then(async (response) => {
+            if (!response.ok) {
+                throw new Error(`Failed to load ${entry.fileName} from logs folder.`);
+            }
+            entry.text = await response.text();
+            return replayLogContent(entry.text, entry.fileName);
+        });
+}
+
+async function handleReplaySelection(fileList, source = "files") {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
 
@@ -1517,7 +2099,7 @@ async function handleReplaySelection(fileList) {
         .map(({ file, entries }) => buildCodexSessionDescriptor(file, entries))
         .filter(Boolean);
 
-    if (codexSessions.length) {
+    if (source === "folder" && codexSessions.length) {
         rebuildSessionLibrary(codexSessions);
         renderSessionLibrary();
         const firstSession = primarySessions()[0];
@@ -1525,8 +2107,12 @@ async function handleReplaySelection(fileList) {
         return;
     }
 
-    const [{ text, file }] = parsedFiles;
-    await replayLogContent(text, file.name);
+    rebuildFileLibrary(parsedFiles);
+    renderSessionLibrary();
+    const firstFile = sessionLibrary.files[0];
+    if (firstFile) {
+        await replayFileEntry(firstFile.id);
+    }
 }
 
 function graphHasDetailedTools(graph) {
@@ -1544,8 +2130,8 @@ function getNodeToolRuns(node) {
 }
 
 function getNodeHeight(node) {
-    void node;
-    return 98;
+    const presentation = getNodePresentation(node);
+    return presentation.description.length > 92 ? 132 : 122;
 }
 
 function createToolHistoryCard(run) {
@@ -1620,19 +2206,40 @@ function closeAgentModal() {
     els.agentModal.setAttribute("aria-hidden", "true");
 }
 
+function openConfigModal() {
+    state.configModalOpen = true;
+    els.configModal.classList.remove("hidden");
+    els.configModal.setAttribute("aria-hidden", "false");
+    renderLLMConfigUI();
+    requestAnimationFrame(() => {
+        els.llmBaseUrl?.focus();
+        els.llmBaseUrl?.select();
+    });
+}
+
+function closeConfigModal() {
+    state.configModalOpen = false;
+    els.configModal.classList.add("hidden");
+    els.configModal.setAttribute("aria-hidden", "true");
+}
+
 function openAgentModal(node) {
     if (!node) return;
+    const presentation = getNodePresentation(node);
     state.modalNodeId = node.id;
-    els.agentModalTitle.textContent = node.label || "Agent Details";
-    els.agentModalSubtitle.textContent = `${trim(
-        node.id,
-        44,
-    )} | ${node.role || "agent"}`;
+    els.agentModalTitle.textContent = presentation.name || "Agent Details";
+    const subtitleParts = [trim(node.id, 44), node.role || "agent"];
+    if (node.label && node.label !== presentation.name) {
+        subtitleParts.push(trim(node.label, 28));
+    }
+    els.agentModalSubtitle.textContent = subtitleParts.join(" | ");
     els.agentModalRole.textContent = node.role || "agent";
     els.agentModalStatus.textContent = normalizeStatus(node.status);
     els.agentModalElapsed.textContent = formatElapsed(node.elapsed_seconds);
     els.agentModalTools.textContent = String(node.tool_count || 0);
     els.agentModalAction.textContent = node.last_action || "Waiting";
+    setSummaryBadge(els.agentModalSummaryBadge, presentation.status);
+    els.agentModalSummaryDescription.textContent = presentation.description;
     els.agentModalPrompt.textContent =
         node.spawn_prompt || "No spawn prompt captured.";
     renderToolHistory(
@@ -1784,6 +2391,7 @@ function nodeText(group, attrs, text) {
 }
 
 function drawNode(node, box) {
+    const presentation = getNodePresentation(node);
     const status = normalizeStatus(node.status);
     const group = createSvg("g", {
         class: `node ${status}${node.id === state.selectedId ? " selected" : ""}`,
@@ -1819,7 +2427,7 @@ function drawNode(node, box) {
     nodeText(
         group,
         { class: "node-title", x: 32, y: 27 },
-        trim(node.label, 15),
+        trim(presentation.name, 21),
     );
     nodeText(
         group,
@@ -1828,8 +2436,13 @@ function drawNode(node, box) {
     );
     nodeText(
         group,
-        { class: "node-action", x: 18, y: 72 },
-        trim(node.last_action, 39),
+        { class: "node-summary", x: 18, y: 72 },
+        trim(presentation.description, 42),
+    );
+    nodeText(
+        group,
+        { class: "node-action", x: 18, y: 94 },
+        trim(node.last_action, 42),
     );
 
     const pillWidth = 72;
@@ -1945,6 +2558,9 @@ function renderSelected() {
         els.selectedElapsed.textContent = "0s";
         els.selectedTools.textContent = "0";
         els.selectedAction.textContent = "Waiting";
+        setSummaryBadge(els.selectedSummaryBadge, "pending");
+        els.selectedSummaryDescription.textContent =
+            "Configure an LLM to generate a readable task summary for this agent.";
         els.selectedPrompt.textContent = "No spawn prompt captured.";
         renderToolHistory(
             els.selectedToolHistory,
@@ -1955,12 +2571,15 @@ function renderSelected() {
         return;
     }
 
-    els.selectedTitle.textContent = selected.label;
+    const presentation = getNodePresentation(selected);
+    els.selectedTitle.textContent = presentation.name;
     els.selectedStatus.textContent = normalizeStatus(selected.status);
     els.selectedRole.textContent = selected.role || "agent";
     els.selectedElapsed.textContent = formatElapsed(selected.elapsed_seconds);
     els.selectedTools.textContent = String(selected.tool_count || 0);
     els.selectedAction.textContent = selected.last_action || "Waiting";
+    setSummaryBadge(els.selectedSummaryBadge, presentation.status);
+    els.selectedSummaryDescription.textContent = presentation.description;
     els.selectedPrompt.textContent =
         selected.spawn_prompt || "No spawn prompt captured.";
     renderToolHistory(
@@ -2034,6 +2653,32 @@ function renderLogDetails() {
     }
 }
 
+function renderLLMConfigUI() {
+    const configured = hasLLMConfig();
+    els.llmConfigButton.textContent = configured
+        ? `LLM: ${trim(state.llmConfig.model, 18)}`
+        : "Configure LLM";
+    els.llmConfigButton.classList.toggle("is-active", configured);
+    const editingConfigForm =
+        state.configModalOpen && els.configModal.contains(document.activeElement);
+    if (!editingConfigForm) {
+        els.llmBaseUrl.value = state.llmConfig.baseUrl || "";
+        els.llmApiKey.value = state.llmConfig.apiKey || "";
+        els.llmModel.value = state.llmConfig.model || "";
+    }
+    const status = state.llmStatus
+        ? state.llmStatus
+        : configured
+          ? `Saved locally. Model ${state.llmConfig.model} at ${state.llmConfig.baseUrl} with key ${maskSecret(state.llmConfig.apiKey)}.`
+          : "No LLM credentials saved yet.";
+    els.llmConfigStatus.textContent = status;
+    els.llmConfigStatus.classList.toggle(
+        "is-error",
+        /failed|error|missing/i.test(status),
+    );
+    els.llmConfigClear.disabled = !configured;
+}
+
 function render() {
     renderMetrics();
     syncSelectedNode();
@@ -2041,6 +2686,7 @@ function render() {
     renderFeed();
     renderSelected();
     renderLogDetails();
+    renderLLMConfigUI();
     if (state.modalNodeId) {
         const activeNode = (state.graph.nodes || []).find(
             (node) => node.id === state.modalNodeId,
@@ -2051,6 +2697,7 @@ function render() {
             closeAgentModal();
         }
     }
+    queueVisibleNodeSummaries();
 }
 
 async function syncLiveDetailedGraph(graph) {
@@ -2153,6 +2800,46 @@ async function postCommand(path) {
     }
     replayStop();
     await fetch(path, { method: "POST" });
+}
+
+function saveLLMConfigFromForm(event) {
+    event.preventDefault();
+    const nextConfig = normalizeLLMConfig({
+        baseUrl: els.llmBaseUrl.value,
+        apiKey: els.llmApiKey.value,
+        model: els.llmModel.value,
+    });
+    if (!nextConfig.baseUrl || !nextConfig.apiKey || !nextConfig.model) {
+        state.llmStatus =
+            "Base URL, API key, and model are all required before saving.";
+        renderLLMConfigUI();
+        return;
+    }
+    state.llmConfig = nextConfig;
+    persistLLMConfig(nextConfig);
+    Object.keys(state.agentSummaries).forEach((agentId) => {
+        if (state.agentSummaries[agentId]?.status === "error") {
+            delete state.agentSummaries[agentId];
+        }
+    });
+    persistAgentSummaries();
+    state.llmStatus = `Saved locally. Using ${nextConfig.model} at ${nextConfig.baseUrl}.`;
+    closeConfigModal();
+    render();
+}
+
+function clearSavedLLMConfig() {
+    state.llmConfig = normalizeLLMConfig({});
+    state.llmStatus = "Saved LLM credentials cleared from local storage.";
+    safeLocalStorageRemove(LLM_CONFIG_STORAGE_KEY);
+    Object.keys(state.agentSummaries).forEach((agentId) => {
+        if (state.agentSummaries[agentId]?.status === "error") {
+            delete state.agentSummaries[agentId];
+        }
+    });
+    persistAgentSummaries();
+    state.summaryQueue.length = 0;
+    render();
 }
 
 /* ═══════════════════════════════════════════════════════════ */
@@ -2455,14 +3142,44 @@ async function replayLogContent(content, filename) {
     replayLoadEvents(events, filename);
 }
 
-els.demoButton.addEventListener("click", () => postCommand("/demo"));
-els.resetButton.addEventListener("click", () => postCommand("/reset"));
-els.pickLogFiles.addEventListener("click", () => els.replayFile.click());
-els.pickLogFolder.addEventListener("click", () => els.replayFolder.click());
+els.demoButton?.addEventListener("click", () => postCommand("/demo"));
+els.resetButton?.addEventListener("click", () => postCommand("/reset"));
+els.llmConfigButton?.addEventListener("click", openConfigModal);
+els.configModalClose?.addEventListener("click", closeConfigModal);
+els.configModalBackdrop?.addEventListener("click", closeConfigModal);
+els.configModal?.addEventListener("click", (event) => {
+    if (event.target === els.configModal) {
+        closeConfigModal();
+    }
+});
+els.llmConfigForm?.addEventListener("submit", saveLLMConfigFromForm);
+els.llmConfigClear?.addEventListener("click", clearSavedLLMConfig);
+els.pickLogFiles?.addEventListener("click", () => els.replayFile.click());
+els.pickLogFolder?.addEventListener("click", () => els.replayFolder.click());
+
+// Populate the replay drop-note with the OS-appropriate sessions path.
+{
+    const ua = navigator.userAgent || "";
+    let sessionsPath;
+    if (/windows/i.test(ua)) {
+        sessionsPath = "`%USERPROFILE%\\.codex\\sessions`";
+    } else if (/macintosh|mac os|iphone|ipad|ipod/i.test(ua)) {
+        sessionsPath = "`~/.codex/sessions`";
+    } else {
+        // Linux and other Unix-like systems
+        sessionsPath = "`~/.codex/sessions`";
+    }
+    if (els.replayDropnote) {
+        els.replayDropnote.textContent =
+            `Load files from ${sessionsPath}. ` +
+            "Primary sessions are listed here; matching sub-agent " +
+            "logs stay hidden and are merged into the replay automatically.";
+    }
+}
 
 async function handleSelectedFiles(fileList) {
     try {
-        await handleReplaySelection(fileList);
+        await handleReplaySelection(fileList, "files");
     } catch (error) {
         window.alert(error instanceof Error ? error.message : "Replay failed.");
     }
@@ -2477,7 +3194,9 @@ els.replayFile.addEventListener("change", async (event) => {
 });
 els.replayFolder.addEventListener("change", async (event) => {
     try {
-        await handleSelectedFiles(event.target.files || []);
+        await handleReplaySelection(event.target.files || [], "folder");
+    } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Replay failed.");
     } finally {
         event.target.value = "";
     }
@@ -2513,6 +3232,10 @@ els.svg.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.configModal.classList.contains("hidden")) {
+        closeConfigModal();
+        return;
+    }
     if (event.key === "Escape" && !els.agentModal.classList.contains("hidden")) {
         closeAgentModal();
     }
@@ -2912,17 +3635,29 @@ setupResizers();
 /* ═══════════════════════════════════════════════════════════ */
 
 els.sessionLibraryList.addEventListener("click", (e) => {
-    const card = e.target.closest("[data-session-id]");
+    const card = e.target.closest("[data-session-id], [data-file-id]");
     if (!card) return;
-    replayCodexSession(card.dataset.sessionId);
+    if (card.dataset.sessionId) {
+        replayCodexSession(card.dataset.sessionId);
+        return;
+    }
+    if (card.dataset.fileId) {
+        void replayFileEntry(card.dataset.fileId);
+    }
 });
 
 els.sessionLibraryList.addEventListener("keydown", (e) => {
     if (e.code !== "Enter" && e.code !== "Space") return;
-    const card = e.target.closest("[data-session-id]");
+    const card = e.target.closest("[data-session-id], [data-file-id]");
     if (!card) return;
     e.preventDefault();
-    replayCodexSession(card.dataset.sessionId);
+    if (card.dataset.sessionId) {
+        replayCodexSession(card.dataset.sessionId);
+        return;
+    }
+    if (card.dataset.fileId) {
+        void replayFileEntry(card.dataset.fileId);
+    }
 });
 
 els.sessionLibraryToggle.addEventListener("click", () => {
@@ -2932,6 +3667,7 @@ els.sessionLibraryToggle.addEventListener("click", () => {
 });
 
 renderSessionLibrary();
+void loadIndexedLogs();
 
 loadState()
     .then(() => {

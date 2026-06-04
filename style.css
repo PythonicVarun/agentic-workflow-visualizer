@@ -97,6 +97,12 @@ button:hover {
     background: #f9fafb;
 }
 
+button.is-active {
+    background: linear-gradient(135deg, #0f766e, #0d9488);
+    border-color: #0f766e;
+    color: #ffffff;
+}
+
 .button-link:hover {
     background: #f9fafb;
     border-color: #a7b0bc;
@@ -459,6 +465,95 @@ h2 {
     gap: 8px;
 }
 
+.config-modal {
+    align-items: center;
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 24px;
+    position: fixed;
+    z-index: 40;
+}
+
+.config-modal.hidden {
+    display: none;
+}
+
+.config-modal-dialog {
+    background: var(--surface);
+    border: 1px solid rgba(15, 118, 110, 0.16);
+    border-radius: 16px;
+    box-shadow:
+        0 30px 60px rgba(15, 23, 42, 0.24),
+        0 8px 20px rgba(15, 118, 110, 0.08);
+    max-width: min(640px, 100%);
+    min-width: min(520px, 100%);
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+}
+
+.config-form {
+    display: grid;
+    gap: 16px;
+    padding: 18px 22px 22px;
+}
+
+.config-field {
+    display: grid;
+    gap: 7px;
+}
+
+.config-label {
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.config-input {
+    background: var(--surface-strong);
+    border: 1px solid #d0d8e2;
+    border-radius: 10px;
+    color: var(--ink);
+    font: inherit;
+    min-width: 0;
+    padding: 11px 12px;
+}
+
+.config-input:focus {
+    border-color: rgba(15, 118, 110, 0.5);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+    outline: none;
+}
+
+.config-status {
+    background: var(--surface-strong);
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    padding: 10px 12px;
+}
+
+.config-status.is-error {
+    background: #fff5f4;
+    border-color: rgba(194, 65, 55, 0.2);
+    color: var(--failed);
+}
+
+.config-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: space-between;
+}
+
+.secondary-button {
+    background: var(--surface-strong);
+}
+
 .inspector {
     display: grid;
     grid-template-rows: minmax(120px, 0.26fr) 14px minmax(220px, 0.42fr) 14px minmax(140px, 0.32fr);
@@ -571,6 +666,55 @@ dd {
     font-size: 0.92rem;
     line-height: 1.45;
     padding-left: 10px;
+}
+
+.summary-card {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+    border: 1px solid #dfe7ef;
+    border-radius: 10px;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+}
+
+.summary-card-head {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.summary-badge {
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 5px 8px;
+    text-transform: uppercase;
+}
+
+.summary-badge.pending {
+    background: var(--pending-soft);
+    color: var(--pending);
+}
+
+.summary-badge.ready {
+    background: var(--complete-soft);
+    color: var(--complete);
+}
+
+.summary-badge.error {
+    background: var(--failed-soft);
+    color: var(--failed);
+}
+
+.summary-description {
+    color: #273241;
+    font-size: 0.84rem;
+    line-height: 1.5;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .prompt-card {
@@ -1131,23 +1275,30 @@ dd {
         grid-template-columns: 1fr;
     }
 
-    .agent-modal {
+    .agent-modal,
+    .config-modal {
         padding: 12px;
     }
 
-    .agent-modal-dialog {
+    .agent-modal-dialog,
+    .config-modal-dialog {
         max-height: calc(100vh - 24px);
         min-width: 0;
     }
 
     .agent-modal-header,
-    .agent-modal-body {
+    .agent-modal-body,
+    .config-form {
         padding-left: 14px;
         padding-right: 14px;
     }
 
     .agent-modal-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .config-actions {
+        flex-direction: column-reverse;
     }
 }
 
@@ -1273,10 +1424,16 @@ dd {
     font-weight: 700;
 }
 
-.node-action {
-    fill: #273241;
+.node-summary {
+    fill: #1f2937;
     font-size: 12px;
     font-weight: 650;
+}
+
+.node-action {
+    fill: #273241;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 .status-pill {
