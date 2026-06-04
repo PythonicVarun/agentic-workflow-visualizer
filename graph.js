@@ -2923,56 +2923,18 @@ async function syncLiveDetailedGraph(graph) {
     }
 }
 
-async function loadState() {
-    try {
-        const response = await fetch("/state", { cache: "no-store" });
-        if (!response.ok) {
-            throw new Error(`State request failed with ${response.status}`);
-        }
-        state.graph = await response.json();
-        state.backendAvailable = true;
-        setConnection(true);
-    } catch {
-        state.backendAvailable = false;
-        state.graph = createEmptyGraph({
-            mode: "static",
-            replay_source: null,
-            current_path: null,
-            file_name: null,
-        });
-        state.liveDetailSequence = null;
-        setConnection(false);
-    }
+function loadState() {
+    state.backendAvailable = false;
+    state.graph = createEmptyGraph({
+        mode: "static",
+        replay_source: null,
+        current_path: null,
+        file_name: null,
+    });
+    state.liveDetailSequence = null;
+    setConnection(false);
     render();
     queueCompletedAgentSummaries();
-    if (state.backendAvailable && !graphHasDetailedTools(state.graph)) {
-        void syncLiveDetailedGraph(state.graph);
-    }
-}
-
-function handleSse(event) {
-    if (replay.active) return;
-    const payload = JSON.parse(event.data);
-    if (payload.state) {
-        state.graph = payload.state;
-        render();
-        queueCompletedAgentSummaries();
-        if (!graphHasDetailedTools(state.graph)) {
-            void syncLiveDetailedGraph(payload.state);
-        } else {
-            state.liveDetailSequence = payload.state.sequence ?? null;
-        }
-    }
-}
-
-function connectStream() {
-    if (!state.backendAvailable) return;
-    const source = new EventSource("/stream");
-    ["state", "event", "reset", "tick"].forEach((name) => {
-        source.addEventListener(name, handleSse);
-    });
-    source.addEventListener("open", () => setConnection(true));
-    source.addEventListener("error", () => setConnection(false));
 }
 
 async function postCommand(path) {
@@ -3867,15 +3829,4 @@ els.sessionLibraryToggle.addEventListener("click", () => {
 renderSessionLibrary();
 void loadIndexedLogs();
 
-loadState()
-    .then(() => {
-        if (!state.backendAvailable) {
-            els.demoButton.disabled = true;
-            els.demoButton.title = "Demo requires the FastAPI server.";
-        }
-        connectStream();
-    })
-    .catch(() => {
-        state.backendAvailable = false;
-        setConnection(false);
-    });
+loadState();

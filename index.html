@@ -18,9 +18,9 @@
                     <h1>Agentic Workflow Visualizer</h1>
                 </div>
                 <div class="topbar-actions">
-                    <div class="connection" id="connection">
+                    <div class="connection disconnected" id="connection">
                         <span class="connection-dot"></span>
-                        <span id="connection-text">Connecting</span>
+                        <span id="connection-text">Static Replay</span>
                     </div>
                     <div class="log-status" id="log-status">Live log</div>
                     <button id="llm-config-button" type="button">
@@ -31,9 +31,10 @@
                         class="button-link"
                         href="/log/current"
                         download
+                        style="display: none;"
                         >Download Log</a
                     >
-                    <button id="demo-button" type="button">Run Demo</button>
+                    <button id="demo-button" type="button" style="display: none;">Run Demo</button>
                     <button id="reset-button" type="button">Reset</button>
                 </div>
             </header>
