@@ -1682,6 +1682,122 @@ function parseLogEntries(content) {
     return entries;
 }
 
+const REPLAY_FILE_EXTENSIONS = [".jsonl", ".ndjson", ".json"];
+let replayDropnoteBaseText = "";
+
+function isSupportedReplayFile(file) {
+    const name = String(file?.name || "").toLowerCase();
+    return REPLAY_FILE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+function formatReplayFilePath(file) {
+    return fileDisplayPath(file) || file?.name || "Unnamed file";
+}
+
+function setReplayDropnote(message = "", tone = "default") {
+    if (!els.replayDropnote) return;
+    const detail = String(message || "").trim();
+    els.replayDropnote.textContent = detail
+        ? `${detail} ${replayDropnoteBaseText}`.trim()
+        : replayDropnoteBaseText;
+    els.replayDropnote.classList.toggle("is-warning", tone === "warning");
+}
+
+function summarizeReplayImportIssues(report, source) {
+    const parts = [];
+    if (report.unreadable.length) {
+        const sample = formatReplayFilePath(report.unreadable[0].file);
+        parts.push(
+            `Skipped ${report.unreadable.length} unreadable file${report.unreadable.length === 1 ? "" : "s"} (for example, ${sample}).`,
+        );
+    }
+    if (report.invalid.length) {
+        const sample = formatReplayFilePath(report.invalid[0].file);
+        parts.push(
+            `Skipped ${report.invalid.length} invalid log file${report.invalid.length === 1 ? "" : "s"} (for example, ${sample}).`,
+        );
+    }
+    if (report.unsupported.length && source === "folder") {
+        parts.push(
+            `Ignored ${report.unsupported.length} non-log file${report.unsupported.length === 1 ? "" : "s"}.`,
+        );
+    }
+    return parts.join(" ");
+}
+
+async function readReplayImport(fileList, source = "files") {
+    const allFiles = Array.from(fileList || []).filter(Boolean);
+    const report = {
+        unreadable: [],
+        invalid: [],
+        unsupported: [],
+    };
+    const supportedFiles = [];
+
+    allFiles.forEach((file) => {
+        if (isSupportedReplayFile(file)) {
+            supportedFiles.push(file);
+        } else {
+            report.unsupported.push(file);
+        }
+    });
+
+    if (!supportedFiles.length) {
+        if (source === "folder") {
+            throw new Error(
+                "No .jsonl, .ndjson, or .json files were found in the selected folder.",
+            );
+        }
+        throw new Error("Select one or more .jsonl, .ndjson, or .json log files.");
+    }
+
+    const settled = await Promise.allSettled(
+        supportedFiles.map(async (file) => {
+            const text = await file.text();
+            return {
+                file,
+                text,
+                entries: parseLogEntries(text),
+            };
+        }),
+    );
+
+    const parsedFiles = [];
+    settled.forEach((result, index) => {
+        const file = supportedFiles[index];
+        if (result.status === "fulfilled") {
+            parsedFiles.push(result.value);
+            return;
+        }
+        const reason =
+            result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason || "Unknown error.");
+        const issue = { file, reason };
+        if (/read|permission|notreadable|acquired/i.test(reason)) {
+            report.unreadable.push(issue);
+        } else {
+            report.invalid.push(issue);
+        }
+    });
+
+    if (!parsedFiles.length) {
+        if (report.unreadable.length && !report.invalid.length) {
+            throw new Error(
+                "None of the selected files could be read. The browser reported a file access or permission error.",
+            );
+        }
+        const firstInvalid = report.invalid[0];
+        if (firstInvalid) {
+            throw new Error(
+                `${formatReplayFilePath(firstInvalid.file)} could not be parsed: ${firstInvalid.reason}`,
+            );
+        }
+    }
+
+    return { parsedFiles, report };
+}
+
 function extractEventsFromEntries(entries) {
     const events = [];
     for (const entry of entries) {
@@ -2350,16 +2466,9 @@ async function handleReplaySelection(fileList, source = "files") {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
 
-    const parsedFiles = await Promise.all(
-        files.map(async (file) => {
-            const text = await file.text();
-            return {
-                file,
-                text,
-                entries: parseLogEntries(text),
-            };
-        }),
-    );
+    const { parsedFiles, report } = await readReplayImport(files, source);
+    const importSummary = summarizeReplayImportIssues(report, source);
+    setReplayDropnote(importSummary, importSummary ? "warning" : "default");
 
     const codexSessions = parsedFiles
         .map(({ file, entries }) => buildCodexSessionDescriptor(file, entries))
@@ -3761,12 +3870,11 @@ els.pickLogFolder?.addEventListener("click", () => els.replayFolder.click());
         // Linux and other Unix-like systems
         sessionsPath = "`~/.codex/sessions`";
     }
-    if (els.replayDropnote) {
-        els.replayDropnote.textContent =
-            `Load files from ${sessionsPath}. ` +
-            "Primary sessions are listed here; matching sub-agent " +
-            "logs stay hidden and are merged into the replay automatically.";
-    }
+    replayDropnoteBaseText =
+        `Load files from ${sessionsPath}. ` +
+        "Primary sessions are listed here; matching sub-agent " +
+        "logs stay hidden and are merged into the replay automatically.";
+    setReplayDropnote();
 }
 
 async function handleSelectedFiles(fileList) {
