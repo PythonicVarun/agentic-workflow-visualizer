@@ -843,6 +843,21 @@ dd {
     word-break: break-word;
 }
 
+.tool-history-card-desc {
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.tool-history-caret {
+    font-size: 0.75rem;
+    color: var(--muted);
+    width: 12px;
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+
 .tool-history-status {
     align-self: flex-start;
     border-radius: 999px;
@@ -1951,7 +1966,7 @@ body.resizing-row * {
     align-items: center;
     padding: 8px 10px;
     gap: 8px;
-    height: 36px;
+    min-height: 36px;
     box-sizing: border-box;
     background: #f8fafc;
 }
@@ -1981,13 +1996,30 @@ body.resizing-row * {
     50% { opacity: 1; transform: scale(1.25); }
 }
 
+.tool-run-title-wrap {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
 .tool-run-title {
     font-weight: 700;
     color: #334155;
-    flex-grow: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.tool-run-desc {
+    font-weight: 500;
+    color: #64748b;
+    font-size: 9px;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 1px;
 }
 
 .tool-run-caret {

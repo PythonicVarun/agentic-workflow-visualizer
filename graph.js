@@ -3,6 +3,7 @@ const MAX_EVENT_HISTORY = 80;
 const ROOT_AGENT_ID = "primary_agent";
 const LLM_CONFIG_STORAGE_KEY = "awv-llm-config";
 const AGENT_SUMMARY_STORAGE_KEY = "awv-agent-summaries";
+const TOOL_DESCRIPTION_STORAGE_KEY = "awv-tool-descriptions";
 
 const state = {
     graph: {
@@ -28,6 +29,10 @@ const state = {
     summaryProcessing: false,
     llmStatus: "",
     expandedToolRuns: new Set(),
+    toolDescriptions: loadToolDescriptions(),
+    toolQueue: [],
+    toolProcessing: false,
+    toolInflight: new Set(),
 };
 
 const sessionLibrary = {
@@ -715,6 +720,22 @@ function persistAgentSummaries() {
     );
 }
 
+function loadToolDescriptions() {
+    const raw = safeLocalStorageGet(TOOL_DESCRIPTION_STORAGE_KEY);
+    const parsed = safeJsonParse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+    }
+    return parsed;
+}
+
+function persistToolDescriptions() {
+    safeLocalStorageSet(
+        TOOL_DESCRIPTION_STORAGE_KEY,
+        JSON.stringify(state.toolDescriptions),
+    );
+}
+
 function hasLLMConfig(config = state.llmConfig) {
     return Boolean(config?.baseUrl && config?.apiKey && config?.model);
 }
@@ -898,7 +919,25 @@ function queueAllPossibleReplaySummaries() {
     (fullGraph.nodes || [])
         .filter((node) => ["complete", "failed"].includes(node.status))
         .forEach((node) => enqueueNodeSummary(node));
+
+    const allRuns = [];
+    (fullGraph.nodes || []).forEach((node) => {
+        const runs = node?.tool_runs || [];
+        allRuns.push(...runs);
+    });
+
+    allRuns.sort((a, b) => {
+        const aSeq = Number(a?.sequence || 0);
+        const bSeq = Number(b?.sequence || 0);
+        return aSeq - bSeq;
+    });
+
+    allRuns.forEach((run) => {
+        enqueueToolDescription(run);
+    });
+
     void processSummaryQueue();
+    void processToolQueue();
 }
 
 function llmContentText(content) {
@@ -1108,6 +1147,111 @@ async function processSummaryQueue() {
             void processSummaryQueue();
         }
     }
+}
+
+async function requestToolDescription(run) {
+    if (!hasLLMConfig()) throw new Error("No LLM config");
+    const url = `${state.llmConfig.baseUrl}/chat/completions`;
+    const truncatedInput = trim(formatToolValue(run.input), 1000);
+
+    const systemPrompt = `You are a helpful coding assistant. Given the name of a tool and its input arguments, generate a very short, single-sentence summary of the action being performed (maximum 10 words).
+Return your response as a JSON object with a single key "description". Do not output markdown, wrap it in a raw JSON string.
+
+Example:
+Tool Name: list_dir
+Tool Input: {"DirectoryPath": "/workspace/project"}
+
+Response: {"description": "Listing files in project"}
+`;
+
+    const userPrompt = `Tool Name: ${run.tool_name}
+Tool Input: ${truncatedInput}`;
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${state.llmConfig.apiKey}`,
+        },
+        body: JSON.stringify({
+            model: state.llmConfig.model,
+            response_format: { type: "json_object" },
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+            ],
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`LLM failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const choice = payload?.choices?.[0];
+    const content = String(choice?.message?.content || "").trim();
+    const objectMatch = content.match(/\{[\s\S]*\}/);
+    const parsed = objectMatch ? safeJsonParse(objectMatch[0]) : null;
+    if (!parsed || !parsed.description) {
+        throw new Error("Invalid JSON response from LLM");
+    }
+    return parsed.description;
+}
+
+function enqueueToolDescription(run) {
+    if (!hasLLMConfig()) return;
+    if (!run?.id || !run?.tool_name) return;
+    const existing = state.toolDescriptions[run.id];
+    if (existing && existing.status === "ready") return;
+    if (existing && existing.status === "error") return;
+    if (state.toolInflight.has(run.id)) return;
+    const queued = state.toolQueue.some((item) => item.id === run.id);
+    if (queued) return;
+    state.toolQueue.push(run);
+    void processToolQueue();
+}
+
+async function processToolQueue() {
+    if (state.toolProcessing || !hasLLMConfig()) return;
+    const run = state.toolQueue.shift();
+    if (!run) return;
+
+    state.toolProcessing = true;
+    state.toolInflight.add(run.id);
+
+    try {
+        const desc = await requestToolDescription(run);
+        state.toolDescriptions[run.id] = {
+            status: "ready",
+            description: desc,
+        };
+        persistToolDescriptions();
+    } catch (error) {
+        state.toolDescriptions[run.id] = {
+            status: "error",
+            description: "Failed to generate tool description.",
+        };
+        persistToolDescriptions();
+    } finally {
+        state.toolInflight.delete(run.id);
+        state.toolProcessing = false;
+        render();
+        if (state.toolQueue.length) {
+            void processToolQueue();
+        }
+    }
+}
+
+function getToolDescription(run) {
+    if (!run?.id) return "";
+    const entry = state.toolDescriptions[run.id];
+    if (entry?.status === "ready") {
+        return entry.description;
+    }
+    if (state.toolInflight.has(run.id)) {
+        return "Generating action description...";
+    }
+    return "";
 }
 
 function createEmptyGraph(log = {}) {
@@ -2294,7 +2438,9 @@ function getNodeFullHeight(node) {
     let h = baseHeight + 12;
     runs.forEach((run) => {
         const isExpanded = state.expandedToolRuns.has(run.id);
-        h += (isExpanded ? 200 : 36) + 8;
+        const hasDesc = getToolDescription(run);
+        const runHeight = isExpanded ? 208 : (hasDesc ? 44 : 36);
+        h += runHeight + 8;
     });
     return h;
 }
@@ -2309,11 +2455,13 @@ function toggleToolRun(runId) {
 }
 
 function createToolHistoryCard(run) {
+    const isExpanded = state.expandedToolRuns.has(run.id);
     const card = document.createElement("article");
-    card.className = `tool-history-card ${toolRunStatus(run)}`;
+    card.className = `tool-history-card ${toolRunStatus(run)}${isExpanded ? " expanded" : ""}`;
 
     const header = document.createElement("div");
     header.className = "tool-history-card-header";
+    header.style.cursor = "pointer";
 
     const titleWrap = document.createElement("div");
     titleWrap.className = "tool-history-card-title-wrap";
@@ -2322,20 +2470,37 @@ function createToolHistoryCard(run) {
     title.className = "tool-history-card-title";
     title.textContent = run.tool_name || "tool";
 
-    const summary = document.createElement("span");
-    summary.className = "tool-history-card-summary";
-    summary.textContent = toolRunSummary(run);
+    const descText = getToolDescription(run);
+    if (!descText && hasLLMConfig()) {
+        enqueueToolDescription(run);
+    }
 
-    titleWrap.append(title, summary);
+    const desc = document.createElement("span");
+    desc.className = "tool-history-card-desc";
+    desc.textContent = descText || toolRunSummary(run) || "No description available";
+
+    titleWrap.append(title, desc);
+
+    const rightWrap = document.createElement("div");
+    rightWrap.className = "tool-history-card-right-wrap";
+    rightWrap.style.display = "flex";
+    rightWrap.style.alignItems = "center";
+    rightWrap.style.gap = "8px";
 
     const status = document.createElement("span");
     status.className = `tool-history-status ${toolRunStatus(run)}`;
     status.textContent = toolRunStatus(run);
 
-    header.append(titleWrap, status);
+    const caret = document.createElement("span");
+    caret.className = "tool-history-caret";
+    caret.textContent = isExpanded ? "▼" : "▶";
+
+    rightWrap.append(status, caret);
+    header.append(titleWrap, rightWrap);
 
     const body = document.createElement("div");
     body.className = "tool-history-card-body";
+    body.style.display = isExpanded ? "grid" : "none";
 
     const callMeta = document.createElement("div");
     callMeta.className = "tool-history-meta";
@@ -2357,6 +2522,12 @@ function createToolHistoryCard(run) {
 
     body.append(callMeta, inputLabel, input, outputLabel, output);
     card.append(header, body);
+
+    header.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleToolRun(run.id);
+    });
+
     return card;
 }
 
@@ -2417,6 +2588,8 @@ function buildAgentModalRenderKey(node) {
             run.sequence,
             summarize(run.input, 80),
             summarize(run.output, 80),
+            state.expandedToolRuns.has(run.id),
+            getToolDescription(run),
         ]),
     });
 }
@@ -2777,7 +2950,8 @@ function drawNode(node, box) {
         let currentY = baseHeight + 12;
         runs.forEach((run) => {
             const isExpanded = state.expandedToolRuns.has(run.id);
-            const runHeight = isExpanded ? 200 : 36;
+            const descText = getToolDescription(run);
+            const runHeight = isExpanded ? 208 : (descText ? 44 : 36);
 
             const fo = createSvg(
                 "foreignObject",
@@ -2808,15 +2982,29 @@ function drawNode(node, box) {
             const dot = document.createElement("span");
             dot.className = "tool-run-dot";
 
+            const titleWrap = document.createElement("div");
+            titleWrap.className = "tool-run-title-wrap";
+
             const title = document.createElement("span");
             title.className = "tool-run-title";
             title.textContent = run.tool_name || "tool";
+            titleWrap.append(title);
+
+            if (descText) {
+                const desc = document.createElement("span");
+                desc.className = "tool-run-desc";
+                desc.textContent = descText;
+                div.title = descText;
+                titleWrap.append(desc);
+            } else {
+                enqueueToolDescription(run);
+            }
 
             const caret = document.createElement("span");
             caret.className = "tool-run-caret";
             caret.textContent = isExpanded ? "▼" : "▶";
 
-            header.append(dot, title, caret);
+            header.append(dot, titleWrap, caret);
             div.append(header);
 
             header.addEventListener("click", (e) => {
@@ -3228,6 +3416,9 @@ function clearSavedLLMConfig() {
     state.llmConfig = normalizeLLMConfig({});
     state.llmStatus = "Saved LLM credentials cleared from local storage.";
     safeLocalStorageRemove(LLM_CONFIG_STORAGE_KEY);
+    safeLocalStorageRemove(TOOL_DESCRIPTION_STORAGE_KEY);
+    state.toolDescriptions = {};
+    state.toolQueue.length = 0;
     Object.keys(state.agentSummaries).forEach((agentId) => {
         if (state.agentSummaries[agentId]?.status === "error") {
             delete state.agentSummaries[agentId];
