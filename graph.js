@@ -27,6 +27,7 @@ const state = {
     summaryInflight: new Set(),
     summaryProcessing: false,
     llmStatus: "",
+    expandedToolRuns: new Set(),
 };
 
 const sessionLibrary = {
@@ -2263,6 +2264,27 @@ function getNodeHeight(node) {
     return Math.max(122, 116 + Math.max(0, lines - 1) * 16);
 }
 
+function getNodeFullHeight(node) {
+    const baseHeight = getNodeHeight(node);
+    const runs = getNodeToolRuns(node);
+    if (runs.length === 0) return baseHeight;
+    let h = baseHeight + 12;
+    runs.forEach((run) => {
+        const isExpanded = state.expandedToolRuns.has(run.id);
+        h += (isExpanded ? 200 : 36) + 8;
+    });
+    return h;
+}
+
+function toggleToolRun(runId) {
+    if (state.expandedToolRuns.has(runId)) {
+        state.expandedToolRuns.delete(runId);
+    } else {
+        state.expandedToolRuns.add(runId);
+    }
+    render();
+}
+
 function createToolHistoryCard(run) {
     const card = document.createElement("article");
     card.className = `tool-history-card ${toolRunStatus(run)}`;
@@ -2416,7 +2438,7 @@ function buildLayout(nodes, edges) {
     const children = new Map(nodes.map((node) => [node.id, []]));
     const targets = new Set();
     const heightById = new Map(
-        nodes.map((node) => [node.id, getNodeHeight(node)]),
+        nodes.map((node) => [node.id, getNodeFullHeight(node)]),
     );
 
     edges.forEach((edge) => {
@@ -2444,78 +2466,133 @@ function buildLayout(nodes, edges) {
         );
     if (!roots.length && nodes.length) roots.push(nodes[0]);
 
-    const positions = new Map();
+    const depths = new Map();
     const visited = new Set();
-    let leafIndex = 0;
     let maxDepth = 0;
 
-    function assign(id, depth) {
-        if (visited.has(id)) return positions.get(id);
+    function getDepth(id, depth) {
+        if (visited.has(id)) return;
         visited.add(id);
+        depths.set(id, depth);
         maxDepth = Math.max(maxDepth, depth);
-
         const childIds = (children.get(id) || []).filter((childId) =>
             byId.has(childId),
         );
-        if (!childIds.length) {
-            const position = { xIndex: leafIndex, depth };
-            leafIndex += 1;
-            positions.set(id, position);
-            return position;
-        }
-
-        const childPositions = childIds.map((childId) =>
-            assign(childId, depth + 1),
-        );
-        const averageX =
-            childPositions.reduce((sum, position) => sum + position.xIndex, 0) /
-            childPositions.length;
-        const position = { xIndex: averageX, depth };
-        positions.set(id, position);
-        return position;
+        childIds.forEach((childId) => getDepth(childId, depth + 1));
     }
 
-    roots.forEach((root) => assign(root.id, 0));
+    roots.forEach((root) => getDepth(root.id, 0));
     nodes.forEach((node) => {
-        if (!visited.has(node.id)) assign(node.id, maxDepth + 1);
+        if (!visited.has(node.id)) getDepth(node.id, maxDepth + 1);
     });
 
     const nodeWidth = 250;
-    const gapX = 285;
-    const gapY = 66;
+    const gapX = 350;
+    const gapY = 50;
     const marginX = 50;
-    const marginY = 56;
-    const depthHeights = Array.from({ length: maxDepth + 1 }, () => 0);
-    positions.forEach((position, id) => {
-        depthHeights[position.depth] = Math.max(
-            depthHeights[position.depth],
-            heightById.get(id) || 118,
+    const marginY = 50;
+
+    const subtreeHeights = new Map();
+    const visitedHeight = new Set();
+
+    function computeSubtreeHeight(id) {
+        if (visitedHeight.has(id)) return subtreeHeights.get(id) || 0;
+        visitedHeight.add(id);
+
+        const parentHeight = heightById.get(id) || 122;
+        const childIds = (children.get(id) || []).filter((childId) =>
+            byId.has(childId),
         );
+
+        if (childIds.length === 0) {
+            subtreeHeights.set(id, parentHeight);
+            return parentHeight;
+        }
+
+        let childrenTotal = 0;
+        childIds.forEach((childId, idx) => {
+            childrenTotal += computeSubtreeHeight(childId);
+            if (idx > 0) childrenTotal += gapY;
+        });
+
+        const h = Math.max(parentHeight, childrenTotal);
+        subtreeHeights.set(id, h);
+        return h;
+    }
+
+    roots.forEach((root) => computeSubtreeHeight(root.id));
+    nodes.forEach((node) => {
+        if (!visitedHeight.has(node.id)) computeSubtreeHeight(node.id);
     });
-    const depthOffsets = [];
-    let offsetY = marginY;
-    depthHeights.forEach((depthHeight, depth) => {
-        depthOffsets[depth] = offsetY;
-        offsetY += depthHeight + gapY;
-    });
-    const width = Math.max(960, marginX * 2 + Math.max(1, leafIndex) * gapX);
-    const totalNodeHeight = depthHeights.reduce((sum, value) => sum + value, 0);
-    const height = Math.max(
-        520,
-        marginY * 2 +
-            totalNodeHeight +
-            Math.max(0, depthHeights.length - 1) * gapY,
-    );
 
     const layout = new Map();
-    positions.forEach((position, id) => {
+    const visitedLayout = new Set();
+
+    function layoutSubtree(id, startY) {
+        if (visitedLayout.has(id)) return;
+        visitedLayout.add(id);
+
+        const parentHeight = heightById.get(id) || 122;
+        const childIds = (children.get(id) || []).filter(
+            (childId) => byId.has(childId) && !visitedLayout.has(childId),
+        );
+
+        let nodeY;
+        if (childIds.length === 0) {
+            nodeY = startY;
+        } else {
+            let childrenTotalHeight = 0;
+            childIds.forEach((childId, idx) => {
+                childrenTotalHeight += subtreeHeights.get(childId) || 0;
+                if (idx > 0) childrenTotalHeight += gapY;
+            });
+
+            if (parentHeight >= childrenTotalHeight) {
+                nodeY = startY;
+                let currentChildY =
+                    startY + (parentHeight - childrenTotalHeight) / 2;
+                childIds.forEach((childId) => {
+                    layoutSubtree(childId, currentChildY);
+                    currentChildY += (subtreeHeights.get(childId) || 0) + gapY;
+                });
+            } else {
+                nodeY = startY + (childrenTotalHeight - parentHeight) / 2;
+                let currentChildY = startY;
+                childIds.forEach((childId) => {
+                    layoutSubtree(childId, currentChildY);
+                    currentChildY += (subtreeHeights.get(childId) || 0) + gapY;
+                });
+            }
+        }
+
+        const depth = depths.get(id) || 0;
         layout.set(id, {
-            x: marginX + position.xIndex * gapX,
-            y: depthOffsets[position.depth] || marginY,
+            x: marginX + depth * gapX,
+            y: nodeY,
             width: nodeWidth,
-            height: heightById.get(id) || 118,
+            height: parentHeight,
         });
+    }
+
+    let currentY = marginY;
+    roots.forEach((root, idx) => {
+        if (idx > 0) currentY += gapY;
+        const rootSubtreeHeight = subtreeHeights.get(root.id) || 122;
+        layoutSubtree(root.id, currentY);
+        currentY += rootSubtreeHeight;
     });
+
+    nodes.forEach((node) => {
+        if (!visitedLayout.has(node.id)) {
+            currentY += gapY;
+            const rootSubtreeHeight = subtreeHeights.get(node.id) || 122;
+            layoutSubtree(node.id, currentY);
+            currentY += rootSubtreeHeight;
+        }
+    });
+
+    const width = Math.max(960, marginX * 2 + maxDepth * gapX + nodeWidth);
+    const height = Math.max(520, currentY + marginY);
 
     return { layout, width, height };
 }
@@ -2525,12 +2602,17 @@ function drawEdge(edge, layout) {
     const to = layout.get(edge.to);
     if (!from || !to) return;
 
-    const x1 = from.x + from.width / 2;
-    const y1 = from.y + from.height;
-    const x2 = to.x + to.width / 2;
-    const y2 = to.y;
-    const midY = y1 + Math.max(35, (y2 - y1) * 0.48);
-    const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+    const fromNode = state.graph.nodes.find((n) => n.id === edge.from);
+    const toNode = state.graph.nodes.find((n) => n.id === edge.to);
+    const fromBaseHeight = fromNode ? getNodeHeight(fromNode) : from.height;
+    const toBaseHeight = toNode ? getNodeHeight(toNode) : to.height;
+
+    const x1 = from.x + from.width;
+    const y1 = from.y + fromBaseHeight / 2;
+    const x2 = to.x;
+    const y2 = to.y + toBaseHeight / 2;
+    const midX = x1 + Math.max(35, (x2 - x1) * 0.48);
+    const path = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
     createSvg("path", {
         class: "edge-path",
         d: path,
@@ -2539,8 +2621,9 @@ function drawEdge(edge, layout) {
     if (edge.label) {
         createSvg("text", {
             class: "edge-label",
-            x: (x1 + x2) / 2 + 8,
-            y: midY - 8,
+            x: (x1 + x2) / 2,
+            y: (y1 + y2) / 2 - 8,
+            "text-anchor": "middle",
         }).textContent = trim(edge.label, 18);
     }
 }
@@ -2589,12 +2672,14 @@ function drawNode(node, box) {
         }
     });
 
+    const baseHeight = getNodeHeight(node);
+
     createSvg(
         "rect",
         {
             class: "node-card",
             width: box.width,
-            height: box.height,
+            height: baseHeight,
             rx: 8,
         },
         group,
@@ -2663,6 +2748,91 @@ function drawNode(node, box) {
         },
         group,
     ).textContent = status;
+
+    const runs = getNodeToolRuns(node);
+    if (runs.length > 0) {
+        let currentY = baseHeight + 12;
+        runs.forEach((run) => {
+            const isExpanded = state.expandedToolRuns.has(run.id);
+            const runHeight = isExpanded ? 200 : 36;
+
+            const fo = createSvg(
+                "foreignObject",
+                {
+                    x: 10,
+                    y: currentY,
+                    width: box.width - 20,
+                    height: runHeight,
+                },
+                group,
+            );
+
+            const div = document.createElement("div");
+            div.className = `tool-run-item ${toolRunStatus(run)}${isExpanded ? " expanded" : ""}`;
+            div.style.height = `${runHeight}px`;
+            div.dataset.runId = run.id;
+
+            div.addEventListener("wheel", (e) => {
+                e.stopPropagation();
+            });
+            div.addEventListener("pointerdown", (e) => {
+                e.stopPropagation();
+            });
+
+            const header = document.createElement("div");
+            header.className = "tool-run-header";
+
+            const dot = document.createElement("span");
+            dot.className = "tool-run-dot";
+
+            const title = document.createElement("span");
+            title.className = "tool-run-title";
+            title.textContent = run.tool_name || "tool";
+
+            const caret = document.createElement("span");
+            caret.className = "tool-run-caret";
+            caret.textContent = isExpanded ? "▼" : "▶";
+
+            header.append(dot, title, caret);
+            div.append(header);
+
+            header.addEventListener("click", (e) => {
+                e.stopPropagation();
+                toggleToolRun(run.id);
+            });
+
+            if (isExpanded) {
+                const body = document.createElement("div");
+                body.className = "tool-run-body";
+
+                const inputSection = document.createElement("div");
+                inputSection.className = "tool-run-section";
+                const inputLabel = document.createElement("div");
+                inputLabel.className = "tool-run-section-label";
+                inputLabel.textContent = "Input";
+                const inputVal = document.createElement("pre");
+                inputVal.className = "tool-run-val";
+                inputVal.textContent = formatToolValue(run.input);
+                inputSection.append(inputLabel, inputVal);
+
+                const outputSection = document.createElement("div");
+                outputSection.className = "tool-run-section";
+                const outputLabel = document.createElement("div");
+                outputLabel.className = "tool-run-section-label";
+                outputLabel.textContent = "Output";
+                const outputVal = document.createElement("pre");
+                outputVal.className = "tool-run-val";
+                outputVal.textContent = formatToolValue(run.output);
+                outputSection.append(outputLabel, outputVal);
+
+                body.append(inputSection, outputSection);
+                div.append(body);
+            }
+
+            fo.appendChild(div);
+            currentY += runHeight + 8;
+        });
+    }
 }
 
 let userHasInteracted = false;
@@ -2679,9 +2849,54 @@ els.stage.addEventListener(
     { once: true },
 );
 
+const savedScrolls = new Map();
+function saveScrollPositions() {
+    savedScrolls.clear();
+    els.svg.querySelectorAll(".tool-run-item").forEach((item) => {
+        const runId = item.dataset.runId;
+        if (!runId) return;
+
+        const body = item.querySelector(".tool-run-body");
+        const vals = item.querySelectorAll(".tool-run-val");
+
+        savedScrolls.set(runId, {
+            bodyTop: body ? body.scrollTop : 0,
+            valsScrolls: Array.from(vals).map((v) => ({
+                top: v.scrollTop,
+                left: v.scrollLeft,
+            })),
+        });
+    });
+}
+
+function restoreScrollPositions() {
+    els.svg.querySelectorAll(".tool-run-item").forEach((item) => {
+        const runId = item.dataset.runId;
+        if (!runId) return;
+
+        const scrollData = savedScrolls.get(runId);
+        if (!scrollData) return;
+
+        const body = item.querySelector(".tool-run-body");
+        if (body && scrollData.bodyTop) {
+            body.scrollTop = scrollData.bodyTop;
+        }
+
+        const vals = item.querySelectorAll(".tool-run-val");
+        vals.forEach((val, idx) => {
+            if (scrollData.valsScrolls && scrollData.valsScrolls[idx]) {
+                const s = scrollData.valsScrolls[idx];
+                if (s.left !== undefined) val.scrollLeft = s.left;
+                if (s.top !== undefined) val.scrollTop = s.top;
+            }
+        });
+    });
+}
+
 function renderGraph() {
     const nodes = state.graph.nodes || [];
     const edges = state.graph.edges || [];
+    saveScrollPositions();
     els.svg.replaceChildren();
 
     els.empty.classList.toggle("hidden", nodes.length > 0);
@@ -2708,6 +2923,7 @@ function renderGraph() {
         fitToView(false);
     }
     applyViewBox();
+    restoreScrollPositions();
 }
 
 function renderFeed() {
