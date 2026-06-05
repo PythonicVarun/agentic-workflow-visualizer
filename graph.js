@@ -3247,6 +3247,7 @@ function renderGraph() {
 }
 
 function renderFeed() {
+    if (!els.feed || !els.sequence) return;
     let events = state.graph.events || [];
     if (state.selectedId) {
         events = events.filter((event) => event.agent_id === state.selectedId);
@@ -3274,6 +3275,7 @@ function renderFeed() {
 }
 
 function renderSelected() {
+    if (!els.selectedTitle) return;
     const nodes = state.graph.nodes || [];
     const selected = state.selectedId
         ? nodes.find((node) => node.id === state.selectedId)
