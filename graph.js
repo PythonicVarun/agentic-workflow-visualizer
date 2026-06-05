@@ -778,6 +778,7 @@ function buildNodeSummarySignature(node) {
             ].join("|"),
         )
         .join("||");
+
     const signatureSource = JSON.stringify({
         id: node.id,
         label: node.label,
@@ -797,6 +798,10 @@ function getNodeSummaryEntry(node) {
     if (!node?.id) return null;
     const summary = state.agentSummaries[node.id];
     if (!summary) return null;
+    if (replay.active) {
+        return summary;
+    }
+
     return summary.signature === buildNodeSummarySignature(node) ? summary : null;
 }
 
@@ -882,6 +887,15 @@ function enqueueNodeSummary(node) {
 function queueCompletedAgentSummaries() {
     if (!hasLLMConfig()) return;
     (state.graph.nodes || [])
+        .filter((node) => ["complete", "failed"].includes(node.status))
+        .forEach((node) => enqueueNodeSummary(node));
+    void processSummaryQueue();
+}
+
+function queueAllPossibleReplaySummaries() {
+    if (!hasLLMConfig() || !replay.active || !replay.allEvents.length) return;
+    const fullGraph = buildGraphFromEvents(replay.allEvents, replay.logDetails);
+    (fullGraph.nodes || [])
         .filter((node) => ["complete", "failed"].includes(node.status))
         .forEach((node) => enqueueNodeSummary(node));
     void processSummaryQueue();
@@ -1051,9 +1065,15 @@ async function processSummaryQueue() {
     render();
 
     try {
-        const node = (state.graph.nodes || []).find(
-            (item) => item.id === nextJob.nodeId,
-        );
+        let node;
+        if (replay.active && replay.allEvents.length > 0) {
+            const fullGraph = buildGraphFromEvents(replay.allEvents, replay.logDetails);
+            node = (fullGraph.nodes || []).find((item) => item.id === nextJob.nodeId);
+        } else {
+            node = (state.graph.nodes || []).find(
+                (item) => item.id === nextJob.nodeId,
+            );
+        }
         if (!node) return;
         const currentSignature = buildNodeSummarySignature(node);
         if (currentSignature !== nextJob.signature) {
@@ -1464,7 +1484,10 @@ function buildGraphFromEvents(events, logDetails = {}) {
         }
     }
 
-    const now = new Date();
+    let now = new Date();
+    if (events && events.length > 0) {
+        now = parseDate(events[events.length - 1].timestamp);
+    }
     const nodeSnapshots = Array.from(nodes.values())
         .map((node) => snapshotNode(node, now))
         .sort((a, b) =>
@@ -3198,6 +3221,7 @@ function saveLLMConfigFromForm(event) {
     closeConfigModal();
     render();
     queueCompletedAgentSummaries();
+    queueAllPossibleReplaySummaries();
 }
 
 function clearSavedLLMConfig() {
@@ -3468,6 +3492,7 @@ function replayLoadEvents(events, filename, logDetails = {}) {
     setConnection(false);
     render();
     replayUpdateUI();
+    queueAllPossibleReplaySummaries();
 }
 
 // Wire up replay player controls
