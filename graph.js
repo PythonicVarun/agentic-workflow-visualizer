@@ -3948,173 +3948,9 @@ function setupResizers() {
     const workspace = document.querySelector(".workspace");
     const workspaceResizer = document.getElementById("workspace-resizer");
     const inspector = document.querySelector(".inspector");
-    const nodePanel = document.querySelector(".node-panel");
-    const replayPanel = document.querySelector(".replay-panel");
-    const feedPanel = document.querySelector(".feed-panel");
-    const inspectorResizer1 = document.getElementById("inspector-resizer-1");
-    const inspectorResizer2 = document.getElementById("inspector-resizer-2");
+    const toggleButton = document.querySelector("#sidebar-toggle-button");
 
     if (!workspace || !workspaceResizer || !inspector) return;
-
-    const MIN_NODE_HEIGHT = 100;
-    const MIN_REPLAY_HEIGHT = 120;
-    const MIN_FEED_HEIGHT = 140;
-    const COLLAPSED_PANEL_HEIGHT = 56;
-    const RESIZER_SPACE = 28;
-    const panelConfigs = [
-        {
-            key: "node",
-            panel: nodePanel,
-            storageKey: "awv-panel-node-collapsed",
-        },
-        {
-            key: "replay",
-            panel: replayPanel,
-            storageKey: "awv-panel-replay-collapsed",
-        },
-        {
-            key: "feed",
-            panel: feedPanel,
-            storageKey: "awv-panel-feed-collapsed",
-        },
-    ].filter((item) => item.panel);
-
-    function isCollapsed(panel) {
-        return panel?.classList.contains("is-collapsed");
-    }
-
-    function setPanelCollapsed(panel, collapsed) {
-        if (!panel) return;
-        panel.classList.toggle("is-collapsed", collapsed);
-        const toggle = panel.querySelector(".panel-toggle");
-        if (toggle) {
-            toggle.setAttribute("aria-expanded", String(!collapsed));
-        }
-    }
-
-    function updateInspectorResizers() {
-        const disableTop = isCollapsed(nodePanel) || isCollapsed(replayPanel);
-        const disableBottom = isCollapsed(replayPanel) || isCollapsed(feedPanel);
-
-        if (inspectorResizer1) {
-            inspectorResizer1.style.opacity = disableTop ? "0.35" : "";
-            inspectorResizer1.style.pointerEvents = disableTop ? "none" : "";
-        }
-        if (inspectorResizer2) {
-            inspectorResizer2.style.opacity = disableBottom ? "0.35" : "";
-            inspectorResizer2.style.pointerEvents = disableBottom ? "none" : "";
-        }
-    }
-
-    function applyInspectorHeights(nodeHeight, replayHeight) {
-        const inspectorHeight = inspector.getBoundingClientRect().height;
-        if (!inspectorHeight) return;
-
-        const nodeCollapsed = isCollapsed(nodePanel);
-        const replayCollapsed = isCollapsed(replayPanel);
-        const feedCollapsed = isCollapsed(feedPanel);
-        const availableHeight = inspectorHeight - RESIZER_SPACE;
-
-        const collapsedTotal =
-            (nodeCollapsed ? COLLAPSED_PANEL_HEIGHT : 0) +
-            (replayCollapsed ? COLLAPSED_PANEL_HEIGHT : 0) +
-            (feedCollapsed ? COLLAPSED_PANEL_HEIGHT : 0);
-        const openCount =
-            Number(!nodeCollapsed) + Number(!replayCollapsed) + Number(!feedCollapsed);
-        const openHeightBudget = Math.max(0, availableHeight - collapsedTotal);
-        let nextNodeHeight = nodeCollapsed
-            ? COLLAPSED_PANEL_HEIGHT
-            : Math.max(MIN_NODE_HEIGHT, Number.parseFloat(nodeHeight) || 0);
-        let nextReplayHeight = replayCollapsed
-            ? COLLAPSED_PANEL_HEIGHT
-            : Math.max(MIN_REPLAY_HEIGHT, Number.parseFloat(replayHeight) || 0);
-        let nodeRow = `${nextNodeHeight}px`;
-        let replayRow = `${nextReplayHeight}px`;
-        let feedRow = feedCollapsed
-            ? `${COLLAPSED_PANEL_HEIGHT}px`
-            : `minmax(${MIN_FEED_HEIGHT}px, 1fr)`;
-
-        if (openCount === 1) {
-            if (!nodeCollapsed) {
-                nodeRow = `minmax(${MIN_NODE_HEIGHT}px, 1fr)`;
-                nextNodeHeight = openHeightBudget;
-            } else if (!replayCollapsed) {
-                replayRow = `minmax(${MIN_REPLAY_HEIGHT}px, 1fr)`;
-                nextReplayHeight = openHeightBudget;
-            } else if (!feedCollapsed) {
-                feedRow = `minmax(${MIN_FEED_HEIGHT}px, 1fr)`;
-            }
-        } else if (!feedCollapsed) {
-            const maxFixedHeight = Math.max(0, openHeightBudget - MIN_FEED_HEIGHT);
-
-            if (!nodeCollapsed && replayCollapsed) {
-                nextNodeHeight = Math.min(nextNodeHeight, maxFixedHeight);
-                nodeRow = `${Math.max(MIN_NODE_HEIGHT, nextNodeHeight)}px`;
-            } else if (nodeCollapsed && !replayCollapsed) {
-                nextReplayHeight = Math.min(nextReplayHeight, maxFixedHeight);
-                replayRow = `${Math.max(MIN_REPLAY_HEIGHT, nextReplayHeight)}px`;
-            } else if (!nodeCollapsed && !replayCollapsed) {
-                const nodeMin = MIN_NODE_HEIGHT;
-                const replayMin = MIN_REPLAY_HEIGHT;
-                const distributable = Math.max(0, maxFixedHeight - nodeMin - replayMin);
-                const desiredNodeExtra = Math.max(0, nextNodeHeight - nodeMin);
-                const desiredReplayExtra = Math.max(0, nextReplayHeight - replayMin);
-                const totalDesiredExtra = desiredNodeExtra + desiredReplayExtra;
-
-                let nodeExtra = distributable / 2;
-                let replayExtra = distributable - nodeExtra;
-
-                if (totalDesiredExtra > 0) {
-                    nodeExtra =
-                        (distributable * desiredNodeExtra) / totalDesiredExtra;
-                    replayExtra = distributable - nodeExtra;
-                }
-
-                nextNodeHeight = nodeMin + nodeExtra;
-                nextReplayHeight = replayMin + replayExtra;
-                nodeRow = `${nextNodeHeight}px`;
-                replayRow = `${nextReplayHeight}px`;
-            }
-        } else if (!nodeCollapsed && !replayCollapsed) {
-            const totalDesired = Math.max(1, nextNodeHeight + nextReplayHeight);
-            nextNodeHeight = (openHeightBudget * nextNodeHeight) / totalDesired;
-            nextReplayHeight = openHeightBudget - nextNodeHeight;
-            nodeRow = `${nextNodeHeight}px`;
-            replayRow = `${nextReplayHeight}px`;
-        }
-
-        inspector.style.gridTemplateRows = `${nodeRow} 14px ${replayRow} 14px ${feedRow}`;
-        if (!nodeCollapsed && Number.isFinite(nextNodeHeight)) {
-            localStorage.setItem("awv-node-height", String(nextNodeHeight));
-        }
-        if (!replayCollapsed && Number.isFinite(nextReplayHeight)) {
-            localStorage.setItem("awv-replay-height", String(nextReplayHeight));
-        }
-        updateInspectorResizers();
-    }
-
-    function togglePanel(panelKey) {
-        const config = panelConfigs.find((item) => item.key === panelKey);
-        if (!config?.panel) return;
-        const currentlyOpen = panelConfigs.filter(
-            ({ panel }) => !isCollapsed(panel),
-        ).length;
-        if (currentlyOpen === 1 && !isCollapsed(config.panel)) {
-            return;
-        }
-        const nextCollapsed = !isCollapsed(config.panel);
-        setPanelCollapsed(config.panel, nextCollapsed);
-        localStorage.setItem(config.storageKey, String(nextCollapsed));
-        const currentNodeHeight =
-            localStorage.getItem("awv-node-height") ||
-            nodePanel?.getBoundingClientRect().height ||
-            MIN_NODE_HEIGHT;
-        const currentReplayHeight =
-            localStorage.getItem("awv-replay-height") ||
-            replayPanel?.getBoundingClientRect().height ||
-            MIN_REPLAY_HEIGHT;
-        applyInspectorHeights(currentNodeHeight, currentReplayHeight);
-    }
 
     // Load initial width of workspace columns
     const savedWidth = localStorage.getItem("awv-inspector-width");
@@ -4122,30 +3958,54 @@ function setupResizers() {
         workspace.style.gridTemplateColumns = `1fr 14px ${savedWidth}px`;
     }
 
-    panelConfigs.forEach(({ panel, storageKey }) => {
-        setPanelCollapsed(panel, localStorage.getItem(storageKey) === "true");
-    });
-    updateInspectorResizers();
-
-    // Load initial heights of inspector rows
-    const savedNodeHeight = localStorage.getItem("awv-node-height");
-    const savedReplayHeight = localStorage.getItem("awv-replay-height");
-    if (savedNodeHeight && savedReplayHeight) {
-        applyInspectorHeights(savedNodeHeight, savedReplayHeight);
-    } else {
-        const inspectorHeight = inspector.getBoundingClientRect().height;
-        if (inspectorHeight) {
-            const usableHeight = inspectorHeight - RESIZER_SPACE;
-            applyInspectorHeights(usableHeight * 0.26, usableHeight * 0.42);
+    // Sidebar collapse state helper
+    function setSidebarCollapsed(collapsed) {
+        const arrow = document.getElementById("sidebar-toggle-arrow");
+        if (collapsed) {
+            workspace.classList.add("sidebar-collapsed");
+            if (toggleButton) {
+                toggleButton.classList.add("is-active");
+                toggleButton.setAttribute("title", "Show Sidebar");
+            }
+            if (arrow) {
+                arrow.setAttribute("d", "M13 9l-3 3 3 3");
+            }
+            localStorage.setItem("awv-sidebar-collapsed", "true");
+        } else {
+            workspace.classList.remove("sidebar-collapsed");
+            if (toggleButton) {
+                toggleButton.classList.remove("is-active");
+                toggleButton.setAttribute("title", "Hide Sidebar");
+            }
+            if (arrow) {
+                arrow.setAttribute("d", "M10 9l3 3-3 3");
+            }
+            localStorage.setItem("awv-sidebar-collapsed", "false");
+        }
+        // Fit graph to view if user hasn't panned or zoomed manually
+        if (
+            typeof userHasInteracted !== "undefined" &&
+            !userHasInteracted &&
+            typeof fitToView === "function"
+        ) {
+            fitToView(false);
         }
     }
 
-    function getClientX(e) {
-        return e.touches ? e.touches[0].clientX : e.clientX;
+    // Toggle sidebar on button click
+    if (toggleButton) {
+        toggleButton.addEventListener("click", () => {
+            const isCollapsed = workspace.classList.contains("sidebar-collapsed");
+            setSidebarCollapsed(!isCollapsed);
+        });
     }
 
-    function getClientY(e) {
-        return e.touches ? e.touches[0].clientY : e.clientY;
+    // Load initial sidebar collapsed state
+    const savedSidebarCollapsed = localStorage.getItem("awv-sidebar-collapsed") === "true";
+    setSidebarCollapsed(savedSidebarCollapsed);
+
+    function getClientX(e) {
+        return e.touches ? e.touches[0].clientX : e.clientX;
     }
 
     // Horizontal Resizer (Workspace Columns: Left vs Right)
@@ -4193,131 +4053,8 @@ function setupResizers() {
         passive: true,
     });
 
-    panelConfigs.forEach(({ key, panel }) => {
-        panel
-            .querySelector(".panel-toggle")
-            ?.addEventListener("click", () => togglePanel(key));
-    });
-
-    // Vertical Resizer 1 (Inspector: Node Panel vs Replay Panel)
-    if (inspectorResizer1 && nodePanel && replayPanel) {
-        function initVerticalResize1(e) {
-            if (isCollapsed(nodePanel) || isCollapsed(replayPanel)) return;
-            const startY = getClientY(e);
-            const startNodeHeight = nodePanel.getBoundingClientRect().height;
-            const startReplayHeight =
-                replayPanel.getBoundingClientRect().height;
-
-            inspectorResizer1.classList.add("active");
-            document.body.classList.add("resizing-row");
-
-            function onMove(moveEvent) {
-                const dy = getClientY(moveEvent) - startY;
-                let newNodeHeight = startNodeHeight + dy;
-                let newReplayHeight = startReplayHeight - dy;
-
-                // Enforce minimum height of 80px for both panels
-                if (newNodeHeight < 80) {
-                    newNodeHeight = 80;
-                    newReplayHeight = startNodeHeight + startReplayHeight - 80;
-                } else if (newReplayHeight < 80) {
-                    newReplayHeight = 80;
-                    newNodeHeight = startNodeHeight + startReplayHeight - 80;
-                }
-
-                applyInspectorHeights(newNodeHeight, newReplayHeight);
-            }
-
-            function onEnd() {
-                inspectorResizer1.classList.remove("active");
-                document.body.classList.remove("resizing-row");
-                document.removeEventListener("mousemove", onMove);
-                document.removeEventListener("mouseup", onEnd);
-                document.removeEventListener("touchmove", onMove);
-                document.removeEventListener("touchend", onEnd);
-            }
-
-            document.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseup", onEnd);
-            document.addEventListener("touchmove", onMove, { passive: false });
-            document.addEventListener("touchend", onEnd);
-        }
-
-        inspectorResizer1.addEventListener("mousedown", initVerticalResize1);
-        inspectorResizer1.addEventListener("touchstart", initVerticalResize1, {
-            passive: true,
-        });
-    }
-
-    // Vertical Resizer 2 (Inspector: Replay Panel vs Feed Panel)
-    if (inspectorResizer2 && replayPanel) {
-        function initVerticalResize2(e) {
-            if (isCollapsed(replayPanel) || isCollapsed(feedPanel)) return;
-            const startY = getClientY(e);
-            const startReplayHeight =
-                replayPanel.getBoundingClientRect().height;
-            const currentNodeHeight = nodePanel
-                ? nodePanel.getBoundingClientRect().height
-                : 180;
-            const inspectorHeight = inspector.getBoundingClientRect().height;
-
-            inspectorResizer2.classList.add("active");
-            document.body.classList.add("resizing-row");
-
-            function onMove(moveEvent) {
-                const dy = getClientY(moveEvent) - startY;
-                let newReplayHeight = startReplayHeight + dy;
-
-                // Feed panel must be at least 100px
-                const maxReplayHeight = Math.max(
-                    80,
-                    inspectorHeight - currentNodeHeight - 28 - 100,
-                );
-                newReplayHeight = Math.max(
-                    80,
-                    Math.min(maxReplayHeight, newReplayHeight),
-                );
-
-                const nodeHeight =
-                    localStorage.getItem("awv-node-height") ||
-                    currentNodeHeight;
-                applyInspectorHeights(nodeHeight, newReplayHeight);
-            }
-
-            function onEnd() {
-                inspectorResizer2.classList.remove("active");
-                document.body.classList.remove("resizing-row");
-                document.removeEventListener("mousemove", onMove);
-                document.removeEventListener("mouseup", onEnd);
-                document.removeEventListener("touchmove", onMove);
-                document.removeEventListener("touchend", onEnd);
-            }
-
-            document.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseup", onEnd);
-            document.addEventListener("touchmove", onMove, { passive: false });
-            document.addEventListener("touchend", onEnd);
-        }
-
-        inspectorResizer2.addEventListener("mousedown", initVerticalResize2);
-        inspectorResizer2.addEventListener("touchstart", initVerticalResize2, {
-            passive: true,
-        });
-    }
-
-    // Window Resize Handler: Update layout if window resizing causes container to be too small
+    // Window Resize Handler: Trigger fitToView(false) when window resizes and user hasn't panned/zoomed
     window.addEventListener("resize", () => {
-        const currentNodeHeight =
-            localStorage.getItem("awv-node-height") ||
-            nodePanel?.getBoundingClientRect().height ||
-            MIN_NODE_HEIGHT;
-        const currentReplayHeight =
-            localStorage.getItem("awv-replay-height") ||
-            replayPanel?.getBoundingClientRect().height ||
-            MIN_REPLAY_HEIGHT;
-        applyInspectorHeights(currentNodeHeight, currentReplayHeight);
-
-        // Trigger fitToView(false) when window resizes and user hasn't panned/zoomed
         if (
             typeof userHasInteracted !== "undefined" &&
             !userHasInteracted &&

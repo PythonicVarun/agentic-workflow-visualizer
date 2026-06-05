@@ -26,6 +26,7 @@
                     <button id="llm-config-button" type="button">
                         Configure LLM
                     </button>
+
                     <a
                         id="download-log"
                         class="button-link"
@@ -56,6 +57,13 @@
                             >
                             <span class="metric-label">Running</span>
                         </div>
+                        <button id="sidebar-toggle-button" class="sidebar-toggle" type="button" title="Toggle Sidebar">
+                            <svg id="sidebar-toggle-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <line x1="15" y1="3" x2="15" y2="21" />
+                                <path id="sidebar-toggle-arrow" d="M10 9l3 3-3 3" />
+                            </svg>
+                        </button>
                     </div>
                     <div class="graph-stage" id="graph-stage">
                         <svg
@@ -148,108 +156,7 @@
                 </div>
 
                 <aside class="inspector" aria-label="Workflow details">
-                    <section
-                        class="panel node-panel collapsible-panel"
-                        data-panel-key="node"
-                    >
-                        <div class="feed-heading panel-heading">
-                            <h2 id="selected-title">Primary Agent</h2>
-                            <button
-                                class="panel-toggle"
-                                type="button"
-                                aria-expanded="true"
-                                aria-label="Collapse Primary Agent panel"
-                            >
-                                <svg
-                                    viewBox="0 0 12 12"
-                                    width="12"
-                                    height="12"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                >
-                                    <polyline points="3,4.5 6,7.5 9,4.5" />
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="panel-body">
-                            <dl>
-                                <div>
-                                    <dt>Status</dt>
-                                    <dd id="selected-status">pending</dd>
-                                </div>
-                                <div>
-                                    <dt>Role</dt>
-                                    <dd id="selected-role">agent</dd>
-                                </div>
-                                <div>
-                                    <dt>Elapsed</dt>
-                                    <dd id="selected-elapsed">0s</dd>
-                                </div>
-                                <div>
-                                    <dt>Tools</dt>
-                                    <dd id="selected-tools">0</dd>
-                                </div>
-                            </dl>
-                            <p id="selected-action" class="selected-action">
-                                Waiting
-                            </p>
-                            <div class="summary-card">
-                                <div class="summary-card-head">
-                                    <span class="prompt-label">Task Summary</span>
-                                    <span
-                                        class="summary-badge pending"
-                                        id="selected-summary-badge"
-                                        >pending</span
-                                    >
-                                </div>
-                                <p
-                                    id="selected-summary-description"
-                                    class="summary-description"
-                                >
-                                    Configure an LLM to generate a readable task
-                                    summary for this agent.
-                                </p>
-                            </div>
-                            <div class="prompt-card">
-                                <span class="prompt-label">Spawn Prompt</span>
-                                <p id="selected-prompt" class="selected-prompt">
-                                    No spawn prompt captured.
-                                </p>
-                            </div>
-                            <section class="tool-history-section">
-                                <div class="tool-history-header">
-                                    <span class="tool-history-title"
-                                        >Tool Activity</span
-                                    >
-                                    <span
-                                        class="tool-history-count"
-                                        id="selected-tool-history-count"
-                                        >0</span
-                                    >
-                                </div>
-                                <div
-                                    id="selected-tool-history-empty"
-                                    class="tool-history-empty"
-                                >
-                                    No tool activity captured yet.
-                                </div>
-                                <div
-                                    id="selected-tool-history"
-                                    class="tool-history-list"
-                                ></div>
-                            </section>
-                        </div>
-                    </section>
 
-                    <div
-                        class="resize-handle resize-handle-h"
-                        id="inspector-resizer-1"
-                        title="Drag to resize panel"
-                    >
-                        <div class="resize-handle-line"></div>
-                    </div>
 
                     <section
                         class="panel replay-panel collapsible-panel"
@@ -259,24 +166,6 @@
                             <h2>Replay Log</h2>
                             <div class="panel-heading-meta">
                                 <span id="log-file-name">No log</span>
-                                <button
-                                    class="panel-toggle"
-                                    type="button"
-                                    aria-expanded="true"
-                                    aria-label="Collapse Replay Log panel"
-                                >
-                                    <svg
-                                        viewBox="0 0 12 12"
-                                        width="12"
-                                        height="12"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                    >
-                                        <polyline points="3,4.5 6,7.5 9,4.5" />
-                                    </svg>
-                                </button>
                             </div>
                         </div>
                         <div class="panel-body">
@@ -525,46 +414,7 @@
                         </div>
                     </section>
 
-                    <div
-                        class="resize-handle resize-handle-h"
-                        id="inspector-resizer-2"
-                        title="Drag to resize panel"
-                    >
-                        <div class="resize-handle-line"></div>
-                    </div>
 
-                    <section
-                        class="panel feed-panel collapsible-panel"
-                        data-panel-key="feed"
-                    >
-                        <div class="feed-heading panel-heading">
-                            <h2>Event Feed</h2>
-                            <div class="panel-heading-meta">
-                                <span id="sequence">0</span>
-                                <button
-                                    class="panel-toggle"
-                                    type="button"
-                                    aria-expanded="true"
-                                    aria-label="Collapse Event Feed panel"
-                                >
-                                    <svg
-                                        viewBox="0 0 12 12"
-                                        width="12"
-                                        height="12"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                    >
-                                        <polyline points="3,4.5 6,7.5 9,4.5" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="panel-body">
-                            <ol id="event-feed" class="event-feed"></ol>
-                        </div>
-                    </section>
                 </aside>
             </main>
         </div>

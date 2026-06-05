@@ -226,6 +226,15 @@ h2 {
     padding: 14px;
 }
 
+.workspace.sidebar-collapsed {
+    grid-template-columns: 1fr 0px 0px !important;
+}
+
+.workspace.sidebar-collapsed #workspace-resizer,
+.workspace.sidebar-collapsed .inspector {
+    display: none !important;
+}
+
 .graph-pane,
 .inspector {
     min-height: 0;
@@ -247,6 +256,33 @@ h2 {
     display: flex;
     gap: 10px;
     padding: 12px;
+}
+
+.sidebar-toggle {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+    background: var(--surface-strong);
+    color: var(--ink);
+    border-color: #a7b0bc;
+}
+
+.sidebar-toggle.is-active {
+    background: var(--surface-strong);
+    color: var(--ink);
 }
 
 .metric {
@@ -555,9 +591,13 @@ h2 {
 }
 
 .inspector {
-    display: grid;
-    grid-template-rows: minmax(120px, 0.26fr) 14px minmax(220px, 0.42fr) 14px minmax(140px, 0.32fr);
+    display: flex;
+    flex-direction: column;
     min-height: 0;
+}
+
+.inspector > .panel {
+    flex: 1;
 }
 
 .panel {
