@@ -3564,8 +3564,13 @@ function setupResizers() {
     // Sidebar collapse state helper
     function setSidebarCollapsed(collapsed) {
         const arrow = document.getElementById("sidebar-toggle-arrow");
+        const replayPanel = document.querySelector(".replay-panel");
+        const replayPlayer = document.getElementById("replay-player");
         if (collapsed) {
             workspace.classList.add("sidebar-collapsed");
+            if (replayPlayer) {
+                workspace.appendChild(replayPlayer);
+            }
             if (toggleButton) {
                 toggleButton.classList.add("is-active");
                 toggleButton.setAttribute("title", "Show Sidebar");
@@ -3576,6 +3581,9 @@ function setupResizers() {
             localStorage.setItem("awv-sidebar-collapsed", "true");
         } else {
             workspace.classList.remove("sidebar-collapsed");
+            if (replayPanel && replayPlayer) {
+                replayPanel.appendChild(replayPlayer);
+            }
             if (toggleButton) {
                 toggleButton.classList.remove("is-active");
                 toggleButton.setAttribute("title", "Hide Sidebar");

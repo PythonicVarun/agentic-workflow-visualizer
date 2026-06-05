@@ -198,144 +198,144 @@
                                 </div>
                             </div>
 
-                            <!-- Replay Player Controls -->
-                            <div class="replay-player" id="replay-player">
-                                <div class="replay-clock-row">
-                                    <div class="replay-sim-clock">
-                                        <svg
-                                            class="clock-icon"
-                                            viewBox="0 0 16 16"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="1.5"
-                                            stroke-linecap="round"
-                                        >
-                                            <circle cx="8" cy="8" r="6.5" />
-                                            <polyline points="8,4 8,8 11,10" />
-                                        </svg>
-                                        <span class="clock-label">Sim</span>
-                                        <span
-                                            class="clock-time"
-                                            id="replay-clock-time"
-                                            >--:--:--</span
-                                        >
-                                    </div>
-                                    <div class="replay-event-counter">
-                                        <span
-                                            class="counter-current"
-                                            id="replay-evt-current"
-                                            >0</span
-                                        >
-                                        <span class="counter-sep">/</span>
-                                        <span
-                                            class="counter-total"
-                                            id="replay-evt-total"
-                                            >0</span
-                                        >
-                                    </div>
-                                </div>
-
-                                <div class="replay-progress-row">
-                                    <div class="replay-progress-track">
-                                        <input
-                                            type="range"
-                                            id="replay-scrubber"
-                                            min="0"
-                                            max="100"
-                                            value="0"
-                                            step="1"
-                                            aria-label="Replay progress"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div class="replay-controls-row">
-                                    <div class="replay-transport">
-                                        <button
-                                            id="replay-rewind"
-                                            type="button"
-                                            title="Rewind to start"
-                                            aria-label="Rewind"
-                                        >
-                                            <svg
-                                                viewBox="0 0 18 18"
-                                                width="16"
-                                                height="16"
-                                                fill="currentColor"
-                                            >
-                                                <rect
-                                                    x="2"
-                                                    y="4"
-                                                    width="2.5"
-                                                    height="10"
-                                                    rx="0.8"
-                                                />
-                                                <polygon
-                                                    points="14,4 7,9 14,14"
-                                                />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            id="replay-play"
-                                            type="button"
-                                            title="Play / Pause"
-                                            aria-label="Play or Pause"
-                                        >
-                                            <svg
-                                                viewBox="0 0 18 18"
-                                                width="16"
-                                                height="16"
-                                                fill="currentColor"
-                                                id="replay-play-icon"
-                                            >
-                                                <polygon points="5,3 15,9 5,15" />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            id="replay-step"
-                                            type="button"
-                                            title="Step forward one event"
-                                            aria-label="Step forward"
-                                        >
-                                            <svg
-                                                viewBox="0 0 18 18"
-                                                width="16"
-                                                height="16"
-                                                fill="currentColor"
-                                            >
-                                                <polygon points="4,4 11,9 4,14" />
-                                                <rect
-                                                    x="12.5"
-                                                    y="4"
-                                                    width="2.5"
-                                                    height="10"
-                                                    rx="0.8"
-                                                />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                    <div class="replay-speed-control">
-                                        <span class="speed-label">Speed</span>
-                                        <select
-                                            id="replay-speed"
-                                            class="replay-speed-select"
-                                            aria-label="Replay speed"
-                                        >
-                                            <option value="0.25">0.25×</option>
-                                            <option value="0.5">0.5×</option>
-                                            <option value="1" selected>1×</option>
-                                            <option value="2">2×</option>
-                                            <option value="4">4×</option>
-                                            <option value="8">8×</option>
-                                            <option value="10">10×</option>
-                                        </select>
-                                    </div>
+                        </div>
+                        <!-- Replay Player Controls -->
+                        <div class="replay-player" id="replay-player">
+                            <div class="replay-clock-row">
+                                <div class="replay-sim-clock">
+                                    <svg
+                                        class="clock-icon"
+                                        viewBox="0 0 16 16"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.5"
+                                        stroke-linecap="round"
+                                    >
+                                        <circle cx="8" cy="8" r="6.5" />
+                                        <polyline points="8,4 8,8 11,10" />
+                                    </svg>
+                                    <span class="clock-label">Sim</span>
                                     <span
-                                        class="replay-elapsed"
-                                        id="replay-elapsed"
-                                        >0s / 0s</span
+                                        class="clock-time"
+                                        id="replay-clock-time"
+                                        >--:--:--</span
                                     >
                                 </div>
+                                <div class="replay-event-counter">
+                                    <span
+                                        class="counter-current"
+                                        id="replay-evt-current"
+                                        >0</span
+                                    >
+                                    <span class="counter-sep">/</span>
+                                    <span
+                                        class="counter-total"
+                                        id="replay-evt-total"
+                                        >0</span
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="replay-progress-row">
+                                <div class="replay-progress-track">
+                                    <input
+                                        type="range"
+                                        id="replay-scrubber"
+                                        min="0"
+                                        max="100"
+                                        value="0"
+                                        step="1"
+                                        aria-label="Replay progress"
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="replay-controls-row">
+                                <div class="replay-transport">
+                                    <button
+                                        id="replay-rewind"
+                                        type="button"
+                                        title="Rewind to start"
+                                        aria-label="Rewind"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                        >
+                                            <rect
+                                                x="2"
+                                                y="4"
+                                                width="2.5"
+                                                height="10"
+                                                rx="0.8"
+                                            />
+                                            <polygon
+                                                points="14,4 7,9 14,14"
+                                            />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        id="replay-play"
+                                        type="button"
+                                        title="Play / Pause"
+                                        aria-label="Play or Pause"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                            id="replay-play-icon"
+                                        >
+                                            <polygon points="5,3 15,9 5,15" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        id="replay-step"
+                                        type="button"
+                                        title="Step forward one event"
+                                        aria-label="Step forward"
+                                    >
+                                        <svg
+                                            viewBox="0 0 18 18"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                        >
+                                            <polygon points="4,4 11,9 4,14" />
+                                            <rect
+                                                x="12.5"
+                                                y="4"
+                                                width="2.5"
+                                                height="10"
+                                                rx="0.8"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="replay-speed-control">
+                                    <span class="speed-label">Speed</span>
+                                    <select
+                                        id="replay-speed"
+                                        class="replay-speed-select"
+                                        aria-label="Replay speed"
+                                    >
+                                        <option value="0.25">0.25×</option>
+                                        <option value="0.5">0.5×</option>
+                                        <option value="1" selected>1×</option>
+                                        <option value="2">2×</option>
+                                        <option value="4">4×</option>
+                                        <option value="8">8×</option>
+                                        <option value="10">10×</option>
+                                    </select>
+                                </div>
+                                <span
+                                    class="replay-elapsed"
+                                    id="replay-elapsed"
+                                    >0s / 0s</span
+                                >
                             </div>
                         </div>
                     </section>
