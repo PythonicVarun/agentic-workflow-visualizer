@@ -47,7 +47,7 @@ const sessionLibrary = {
 };
 
 const els = {
-    svg: document.querySelector("#graph"),
+    svg: document.querySelector("#linear-flow"),
     empty: document.querySelector("#empty-state"),
     connection: document.querySelector("#connection"),
     connectionText: document.querySelector("#connection-text"),
@@ -110,10 +110,6 @@ const els = {
     agentModalToolHistoryEmpty: document.querySelector(
         "#agent-modal-tool-history-empty",
     ),
-    zoomIn: document.querySelector("#zoom-in"),
-    zoomOut: document.querySelector("#zoom-out"),
-    zoomFit: document.querySelector("#zoom-fit"),
-    zoomLevel: document.querySelector("#zoom-level"),
     llmConfigButton: document.querySelector("#llm-config-button"),
     configModal: document.querySelector("#config-modal"),
     configModalBackdrop: document.querySelector("#config-modal-backdrop"),
@@ -149,263 +145,15 @@ const els = {
     sessionLibraryEmpty: document.querySelector("#session-library-empty"),
 };
 
-const zoomPan = {
-    vx: 0,
-    vy: 0,
-    vw: 960,
-    vh: 520,
-    contentW: 960,
-    contentH: 520,
-    minScale: 0.25,
-    maxScale: 4,
-    dragging: false,
-    dragPending: false,
-    dragPointerId: 0,
-    dragStartX: 0,
-    dragStartY: 0,
-    vxStart: 0,
-    vyStart: 0,
-    lastPinchDist: 0,
-    animId: null,
-};
+// Zoom & pan disabled for linear scrollable layout
+const zoomPan = { vx: 0, vy: 0, vw: 960, vh: 520, contentW: 960, contentH: 520 };
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
-function currentScale() {
-    const stageRect = els.stage.getBoundingClientRect();
-    if (!stageRect.width) return 1;
-    return stageRect.width / zoomPan.vw;
-}
-
-function applyViewBox() {
-    els.svg.setAttribute(
-        "viewBox",
-        `${zoomPan.vx} ${zoomPan.vy} ${zoomPan.vw} ${zoomPan.vh}`,
-    );
-    const pct = Math.round(currentScale() * 100);
-    els.zoomLevel.textContent = `${pct}%`;
-}
-
-function animateViewBox(
-    targetVx,
-    targetVy,
-    targetVw,
-    targetVh,
-    duration = 280,
-) {
-    if (zoomPan.animId) cancelAnimationFrame(zoomPan.animId);
-    const startVx = zoomPan.vx,
-        startVy = zoomPan.vy;
-    const startVw = zoomPan.vw,
-        startVh = zoomPan.vh;
-    const t0 = performance.now();
-    function tick(now) {
-        const elapsed = now - t0;
-        const progress = Math.min(elapsed / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 3);
-        zoomPan.vx = startVx + (targetVx - startVx) * ease;
-        zoomPan.vy = startVy + (targetVy - startVy) * ease;
-        zoomPan.vw = startVw + (targetVw - startVw) * ease;
-        zoomPan.vh = startVh + (targetVh - startVh) * ease;
-        applyViewBox();
-        if (progress < 1) {
-            zoomPan.animId = requestAnimationFrame(tick);
-        } else {
-            zoomPan.animId = null;
-        }
-    }
-    zoomPan.animId = requestAnimationFrame(tick);
-}
-
-function zoomAtPoint(factor, screenX, screenY, smooth = false) {
-    const stageRect = els.stage.getBoundingClientRect();
-    const stageW = stageRect.width;
-    const stageH = stageRect.height;
-    if (!stageW || !stageH) return;
-
-    const fx = (screenX - stageRect.left) / stageW;
-    const fy = (screenY - stageRect.top) / stageH;
-    const svgX = zoomPan.vx + fx * zoomPan.vw;
-    const svgY = zoomPan.vy + fy * zoomPan.vh;
-
-    let newVw = zoomPan.vw / factor;
-    let newVh = zoomPan.vh / factor;
-
-    const newScale = stageW / newVw;
-    const clamped = clamp(newScale, zoomPan.minScale, zoomPan.maxScale);
-    if (clamped !== newScale) {
-        newVw = stageW / clamped;
-        newVh = stageH / clamped;
-    }
-
-    const newVx = svgX - fx * newVw;
-    const newVy = svgY - fy * newVh;
-
-    if (smooth) {
-        animateViewBox(newVx, newVy, newVw, newVh);
-    } else {
-        zoomPan.vx = newVx;
-        zoomPan.vy = newVy;
-        zoomPan.vw = newVw;
-        zoomPan.vh = newVh;
-        applyViewBox();
-    }
-}
-
-function fitToView(smooth = true) {
-    const stageRect = els.stage.getBoundingClientRect();
-    if (!stageRect.width || !stageRect.height) return;
-    const pad = 40;
-    const cw = zoomPan.contentW + pad * 2;
-    const ch = zoomPan.contentH + pad * 2;
-    const stageAspect = stageRect.width / stageRect.height;
-    const contentAspect = cw / ch;
-    let vw, vh;
-    if (contentAspect > stageAspect) {
-        vw = cw;
-        vh = cw / stageAspect;
-    } else {
-        vh = ch;
-        vw = ch * stageAspect;
-    }
-    const vx = -pad + (zoomPan.contentW - vw + pad * 2) / 2;
-    const vy = -pad + (zoomPan.contentH - vh + pad * 2) / 2;
-    if (smooth) {
-        animateViewBox(vx, vy, vw, vh);
-    } else {
-        zoomPan.vx = vx;
-        zoomPan.vy = vy;
-        zoomPan.vw = vw;
-        zoomPan.vh = vh;
-        applyViewBox();
-    }
-}
-
-function zoomByStep(factor) {
-    const stageRect = els.stage.getBoundingClientRect();
-    const cx = stageRect.left + stageRect.width / 2;
-    const cy = stageRect.top + stageRect.height / 2;
-    zoomAtPoint(factor, cx, cy, true);
-}
-
-els.stage.addEventListener(
-    "wheel",
-    (e) => {
-        e.preventDefault();
-        const delta = -e.deltaY;
-        const factor = 1 + Math.sign(delta) * 0.12;
-        zoomAtPoint(factor, e.clientX, e.clientY);
-    },
-    { passive: false },
-);
-
-const DRAG_THRESHOLD = 5;
-
-els.stage.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest(".zoom-controls")) return;
-    zoomPan.dragging = false;
-    zoomPan.dragPending = true;
-    zoomPan.dragStartX = e.clientX;
-    zoomPan.dragStartY = e.clientY;
-    zoomPan.vxStart = zoomPan.vx;
-    zoomPan.vyStart = zoomPan.vy;
-    zoomPan.dragPointerId = e.pointerId;
-});
-
-els.stage.addEventListener("pointermove", (e) => {
-    if (!zoomPan.dragPending && !zoomPan.dragging) return;
-
-    const dx = e.clientX - zoomPan.dragStartX;
-    const dy = e.clientY - zoomPan.dragStartY;
-
-    if (zoomPan.dragPending && !zoomPan.dragging) {
-        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD)
-            return;
-        zoomPan.dragPending = false;
-        zoomPan.dragging = true;
-        els.stage.classList.add("grabbing");
-        els.stage.setPointerCapture(zoomPan.dragPointerId);
-    }
-
-    const stageRect = els.stage.getBoundingClientRect();
-    const svgPerPx = zoomPan.vw / stageRect.width;
-    zoomPan.vx = zoomPan.vxStart - dx * svgPerPx;
-    zoomPan.vy = zoomPan.vyStart - dy * svgPerPx;
-    applyViewBox();
-});
-
-els.stage.addEventListener("pointerup", () => {
-    zoomPan.dragging = false;
-    zoomPan.dragPending = false;
-    els.stage.classList.remove("grabbing");
-});
-
-els.stage.addEventListener("pointercancel", () => {
-    zoomPan.dragging = false;
-    zoomPan.dragPending = false;
-    els.stage.classList.remove("grabbing");
-});
-
-function pinchDist(touches) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.hypot(dx, dy);
-}
-
-els.stage.addEventListener(
-    "touchstart",
-    (e) => {
-        if (e.touches.length === 2) {
-            zoomPan.lastPinchDist = pinchDist(e.touches);
-        }
-    },
-    { passive: true },
-);
-
-els.stage.addEventListener(
-    "touchmove",
-    (e) => {
-        if (e.touches.length !== 2) return;
-        e.preventDefault();
-        const dist = pinchDist(e.touches);
-        const factor = dist / zoomPan.lastPinchDist;
-        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        zoomAtPoint(factor, cx, cy);
-        zoomPan.lastPinchDist = dist;
-    },
-    { passive: false },
-);
-
-els.zoomIn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    zoomByStep(1.3);
-});
-els.zoomOut.addEventListener("click", (e) => {
-    e.stopPropagation();
-    zoomByStep(1 / 1.3);
-});
-els.zoomFit.addEventListener("click", (e) => {
-    e.stopPropagation();
-    fitToView();
-});
-
-document.addEventListener("keydown", (e) => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")) {
-        e.preventDefault();
-        zoomByStep(1.3);
-    } else if ((e.ctrlKey || e.metaKey) && e.key === "-") {
-        e.preventDefault();
-        zoomByStep(1 / 1.3);
-    } else if ((e.ctrlKey || e.metaKey) && e.key === "0") {
-        e.preventDefault();
-        fitToView();
-    }
-});
+function fitToView() {}
+function applyViewBox() {}
 
 function createSvg(tag, attrs = {}, parent = els.svg) {
     const element = document.createElementNS(SVG_NS, tag);
@@ -2575,9 +2323,9 @@ function createToolHistoryCard(run) {
     const titleWrap = document.createElement("div");
     titleWrap.className = "tool-history-card-title-wrap";
 
-    const title = document.createElement("strong");
-    title.className = "tool-history-card-title";
-    title.textContent = run.tool_name || "tool";
+    // const title = document.createElement("strong");
+    // title.className = "tool-history-card-title";
+    // title.textContent = run.tool_name || "tool";
 
     const descText = getToolDescription(run);
     if (!descText && hasLLMConfig()) {
@@ -2588,7 +2336,7 @@ function createToolHistoryCard(run) {
     desc.className = "tool-history-card-desc";
     desc.textContent = descText || toolRunSummary(run) || "No description available";
 
-    titleWrap.append(title, desc);
+    titleWrap.append(desc);
 
     const rightWrap = document.createElement("div");
     rightWrap.className = "tool-history-card-right-wrap";
@@ -2613,7 +2361,7 @@ function createToolHistoryCard(run) {
 
     const callMeta = document.createElement("div");
     callMeta.className = "tool-history-meta";
-    callMeta.textContent = `Call: ${run.id || "n/a"}`;
+    callMeta.textContent = `Tool: ${run.tool_name || "tool"} | Call: ${run.id || "n/a"}`;
 
     const inputLabel = document.createElement("span");
     inputLabel.className = "tool-history-label";
@@ -2738,344 +2486,184 @@ function openAgentModal(node) {
     els.agentModal.setAttribute("aria-hidden", "false");
 }
 
-function buildLayout(nodes, edges) {
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const children = new Map(nodes.map((node) => [node.id, []]));
-    const targets = new Set();
-    const heightById = new Map(
-        nodes.map((node) => [node.id, getNodeFullHeight(node)]),
-    );
-
-    edges.forEach((edge) => {
-        if (!byId.has(edge.from) || !byId.has(edge.to)) return;
-        children.get(edge.from).push(edge.to);
-        targets.add(edge.to);
-    });
-
-    children.forEach((list) => {
-        list.sort((a, b) => {
-            const aNode = byId.get(a);
-            const bNode = byId.get(b);
-            return String(aNode?.started_at || a).localeCompare(
-                String(bNode?.started_at || b),
-            );
-        });
-    });
-
-    const roots = nodes
-        .filter((node) => !targets.has(node.id))
-        .sort((a, b) =>
-            String(a.started_at || a.id).localeCompare(
-                String(b.started_at || b.id),
-            ),
-        );
-    if (!roots.length && nodes.length) roots.push(nodes[0]);
-
-    const depths = new Map();
-    const visited = new Set();
-    let maxDepth = 0;
-
-    function getDepth(id, depth) {
-        if (visited.has(id)) return;
-        visited.add(id);
-        depths.set(id, depth);
-        maxDepth = Math.max(maxDepth, depth);
-        const childIds = (children.get(id) || []).filter((childId) =>
-            byId.has(childId),
-        );
-        childIds.forEach((childId) => getDepth(childId, depth + 1));
-    }
-
-    roots.forEach((root) => getDepth(root.id, 0));
-    nodes.forEach((node) => {
-        if (!visited.has(node.id)) getDepth(node.id, maxDepth + 1);
-    });
-
-    const nodeWidth = 250;
-    const gapX = 350;
-    const gapY = 50;
-    const marginX = 50;
-    const marginY = 50;
-
-    const subtreeHeights = new Map();
-    const visitedHeight = new Set();
-
-    function computeSubtreeHeight(id) {
-        if (visitedHeight.has(id)) return subtreeHeights.get(id) || 0;
-        visitedHeight.add(id);
-
-        const parentHeight = heightById.get(id) || 122;
-        const childIds = (children.get(id) || []).filter((childId) =>
-            byId.has(childId),
-        );
-
-        if (childIds.length === 0) {
-            subtreeHeights.set(id, parentHeight);
-            return parentHeight;
-        }
-
-        let childrenTotal = 0;
-        childIds.forEach((childId, idx) => {
-            childrenTotal += computeSubtreeHeight(childId);
-            if (idx > 0) childrenTotal += gapY;
-        });
-
-        const h = Math.max(parentHeight, childrenTotal);
-        subtreeHeights.set(id, h);
-        return h;
-    }
-
-    roots.forEach((root) => computeSubtreeHeight(root.id));
-    nodes.forEach((node) => {
-        if (!visitedHeight.has(node.id)) computeSubtreeHeight(node.id);
-    });
-
-    const layout = new Map();
-    const visitedLayout = new Set();
-
-    function layoutSubtree(id, startY) {
-        if (visitedLayout.has(id)) return;
-        visitedLayout.add(id);
-
-        const parentHeight = heightById.get(id) || 122;
-        const childIds = (children.get(id) || []).filter(
-            (childId) => byId.has(childId) && !visitedLayout.has(childId),
-        );
-
-        let nodeY;
-        if (childIds.length === 0) {
-            nodeY = startY;
-        } else {
-            let childrenTotalHeight = 0;
-            childIds.forEach((childId, idx) => {
-                childrenTotalHeight += subtreeHeights.get(childId) || 0;
-                if (idx > 0) childrenTotalHeight += gapY;
-            });
-
-            if (parentHeight >= childrenTotalHeight) {
-                nodeY = startY;
-                let currentChildY =
-                    startY + (parentHeight - childrenTotalHeight) / 2;
-                childIds.forEach((childId) => {
-                    layoutSubtree(childId, currentChildY);
-                    currentChildY += (subtreeHeights.get(childId) || 0) + gapY;
-                });
-            } else {
-                nodeY = startY + (childrenTotalHeight - parentHeight) / 2;
-                let currentChildY = startY;
-                childIds.forEach((childId) => {
-                    layoutSubtree(childId, currentChildY);
-                    currentChildY += (subtreeHeights.get(childId) || 0) + gapY;
-                });
-            }
-        }
-
-        const depth = depths.get(id) || 0;
-        layout.set(id, {
-            x: marginX + depth * gapX,
-            y: nodeY,
-            width: nodeWidth,
-            height: parentHeight,
-        });
-    }
-
-    let currentY = marginY;
-    roots.forEach((root, idx) => {
-        if (idx > 0) currentY += gapY;
-        const rootSubtreeHeight = subtreeHeights.get(root.id) || 122;
-        layoutSubtree(root.id, currentY);
-        currentY += rootSubtreeHeight;
-    });
-
-    nodes.forEach((node) => {
-        if (!visitedLayout.has(node.id)) {
-            currentY += gapY;
-            const rootSubtreeHeight = subtreeHeights.get(node.id) || 122;
-            layoutSubtree(node.id, currentY);
-            currentY += rootSubtreeHeight;
-        }
-    });
-
-    const width = Math.max(960, marginX * 2 + maxDepth * gapX + nodeWidth);
-    const height = Math.max(520, currentY + marginY);
-
-    return { layout, width, height };
-}
-
-function drawEdge(edge, layout) {
-    const from = layout.get(edge.from);
-    const to = layout.get(edge.to);
-    if (!from || !to) return;
-
-    const fromNode = state.graph.nodes.find((n) => n.id === edge.from);
-    const toNode = state.graph.nodes.find((n) => n.id === edge.to);
-    const fromBaseHeight = fromNode ? getNodeHeight(fromNode) : from.height;
-    const toBaseHeight = toNode ? getNodeHeight(toNode) : to.height;
-
-    const x1 = from.x + from.width;
-    const y1 = from.y + fromBaseHeight / 2;
-    const x2 = to.x;
-    const y2 = to.y + toBaseHeight / 2;
-    const midX = x1 + Math.max(35, (x2 - x1) * 0.48);
-    const path = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-    createSvg("path", {
-        class: "edge-path",
-        d: path,
-    });
-
-    if (edge.label) {
-        createSvg("text", {
-            class: "edge-label",
-            x: (x1 + x2) / 2,
-            y: (y1 + y2) / 2 - 8,
-            "text-anchor": "middle",
-        }).textContent = trim(edge.label, 18);
-    }
-}
-
-function nodeText(group, attrs, text) {
-    createSvg("text", attrs, group).textContent = text;
-}
-
-function nodeMultilineText(group, attrs, lines, lineHeight = 15) {
-    const text = createSvg("text", attrs, group);
-    lines.forEach((line, index) => {
-        const span = createSvg(
-            "tspan",
-            {
-                x: attrs.x,
-                dy: index === 0 ? 0 : lineHeight,
-            },
-            text,
-        );
-        span.textContent = line;
-    });
-    return text;
-}
-
-function drawNode(node, box) {
+function drawNode(node) {
     const presentation = getNodePresentation(node);
     const status = normalizeStatus(node.status);
     const isTerminal = ["complete", "failed"].includes(status);
-    const descriptionLines = wrapNodeText(presentation.description, 34);
-    const group = createSvg("g", {
-        class: `node ${status}${node.id === state.selectedId ? " selected" : ""}`,
-        transform: `translate(${box.x}, ${box.y})`,
-        tabindex: 0,
-    });
+    const isSelected = node.id === state.selectedId;
 
-    group.addEventListener("click", () => {
+    // Create the main card container
+    const card = document.createElement("div");
+    card.className = `node-card-html ${status}${isSelected ? " selected" : ""}`;
+    card.id = `card-${node.id}`;
+    card.tabIndex = 0;
+
+    // Click to select and open modal
+    card.addEventListener("click", (e) => {
+        // If clicking a link or interactive element inside the card, don't open the modal
+        if (e.target.closest("a") || e.target.closest(".tool-run-item")) return;
+
+        e.stopPropagation();
         state.selectedId = node.id;
         openAgentModal(node);
         render();
     });
-    group.addEventListener("keydown", (event) => {
+
+    card.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
             state.selectedId = node.id;
             openAgentModal(node);
             render();
         }
     });
 
-    const baseHeight = getNodeHeight(node);
+    // 1. Header
+    const header = document.createElement("div");
+    header.className = "card-header-html";
 
-    createSvg(
-        "rect",
-        {
-            class: "node-card",
-            width: box.width,
-            height: baseHeight,
-            rx: 8,
-        },
-        group,
-    );
+    const titleArea = document.createElement("div");
+    titleArea.className = "card-title-area";
 
-    createSvg("circle", { class: "running-dot", cx: 20, cy: 22, r: 4 }, group);
-    nodeText(
-        group,
-        { class: "node-title", x: 32, y: 27 },
-        trim(presentation.name, 21),
-    );
-    nodeText(
-        group,
-        { class: "node-meta", x: 18, y: 48 },
-        `${trim(node.role || "agent", 22)} | ${formatElapsed(node.elapsed_seconds)}`,
-    );
-    if (isTerminal) {
-        nodeMultilineText(
-            group,
-            { class: "node-summary", x: 18, y: 72 },
-            descriptionLines,
-            15,
-        );
-    } else {
-        nodeMultilineText(
-            group,
-            { class: "node-summary", x: 18, y: 72 },
-            descriptionLines,
-            15,
-        );
-        nodeText(
-            group,
-            {
-                class: "node-action",
-                x: 18,
-                y: 94 + Math.max(0, descriptionLines.length - 1) * 15,
-            },
-            trim(node.last_action, 42),
-        );
+    const dot = document.createElement("div");
+    dot.className = "card-running-dot";
+    titleArea.appendChild(dot);
+
+    const title = document.createElement("span");
+    title.className = "card-title-text";
+    title.textContent = presentation.name;
+    titleArea.appendChild(title);
+
+    const badges = document.createElement("div");
+    badges.className = "card-badges";
+
+    const roleBadge = document.createElement("span");
+    roleBadge.className = "card-badge role";
+    roleBadge.textContent = node.role || "agent";
+    badges.appendChild(roleBadge);
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = "card-badge status";
+    statusBadge.textContent = status;
+    badges.appendChild(statusBadge);
+
+    header.appendChild(titleArea);
+    header.appendChild(badges);
+    card.appendChild(header);
+
+    // 2. Metadata (Model, Elapsed Time, Started At)
+    const meta = document.createElement("div");
+    meta.className = "card-meta-html";
+
+    if (node.model) {
+        const modelItem = document.createElement("div");
+        modelItem.className = "card-meta-item";
+        modelItem.innerHTML = `<strong>Model:</strong> <span>${node.model}</span>`;
+        meta.appendChild(modelItem);
     }
 
-    const pillWidth = 72;
-    const pillX = box.width - pillWidth - 12;
-    const pillY = 12;
-    const pillHeight = 22;
-    createSvg(
-        "rect",
-        {
-            class: "status-pill",
-            x: pillX,
-            y: pillY,
-            width: pillWidth,
-            height: pillHeight,
-            rx: 8,
-        },
-        group,
-    );
-    createSvg(
-        "text",
-        {
-            class: "status-text",
-            x: pillX + pillWidth / 2,
-            y: pillY + pillHeight / 2,
-            "text-anchor": "middle",
-            "dominant-baseline": "central",
-        },
-        group,
-    ).textContent = status;
+    const elapsedItem = document.createElement("div");
+    elapsedItem.className = "card-meta-item";
+    elapsedItem.innerHTML = `<strong>Elapsed:</strong> <span>${formatElapsed(node.elapsed_seconds)}</span>`;
+    meta.appendChild(elapsedItem);
 
+    if (node.started_at) {
+        const startedItem = document.createElement("div");
+        startedItem.className = "card-meta-item";
+        startedItem.innerHTML = `<strong>Started:</strong> <span>${formatDateTime(node.started_at)}</span>`;
+        meta.appendChild(startedItem);
+    }
+    card.appendChild(meta);
+
+    // 3. Spawning relationships (clickable links)
+    const relations = [];
+    if (node.parent_id) {
+        const parentNode = state.graph.nodes.find(n => n.id === node.parent_id);
+        const parentName = parentNode ? getNodePresentation(parentNode).name : humanize(node.parent_id);
+        relations.push(`Spawned by parent agent: <a href="#card-${node.parent_id}" data-target-id="${node.parent_id}">${parentName}</a>`);
+    }
+
+    const childNodes = (state.graph.nodes || []).filter(n => n.parent_id === node.id);
+    if (childNodes.length > 0) {
+        const childLinks = childNodes.map(child => {
+            const childName = getNodePresentation(child).name;
+            return `<a href="#card-${child.id}" data-target-id="${child.id}">${childName}</a>`;
+        }).join(", ");
+        relations.push(`Spawned sub-agents: ${childLinks}`);
+    }
+
+    if (relations.length > 0) {
+        const relationsDiv = document.createElement("div");
+        relationsDiv.className = "card-relations-html";
+        relationsDiv.innerHTML = relations.join("<br>");
+
+        // Handle smooth scrolling on click
+        relationsDiv.querySelectorAll("a").forEach(link => {
+            link.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const targetId = link.dataset.targetId;
+                state.selectedId = targetId;
+                render();
+                const newTargetEl = document.getElementById(`card-${targetId}`);
+                if (newTargetEl) {
+                    newTargetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                    newTargetEl.classList.add("highlight-flash");
+                    setTimeout(() => newTargetEl.classList.remove("highlight-flash"), 1200);
+                }
+            });
+        });
+        card.appendChild(relationsDiv);
+    }
+
+    // 4. Spawn Prompt
+    if (node.spawn_prompt) {
+        const promptDiv = document.createElement("div");
+        promptDiv.className = "card-prompt-html";
+
+        const promptLabel = document.createElement("span");
+        promptLabel.className = "card-prompt-label";
+        promptLabel.textContent = "Spawn Prompt";
+
+        const promptText = document.createElement("pre");
+        promptText.className = "card-prompt-text";
+        promptText.textContent = node.spawn_prompt;
+
+        promptDiv.appendChild(promptLabel);
+        promptDiv.appendChild(promptText);
+        card.appendChild(promptDiv);
+    }
+
+    // 5. Description / Current Action
+    const descriptionDiv = document.createElement("div");
+    descriptionDiv.className = "card-description-html";
+    descriptionDiv.textContent = presentation.description;
+    card.appendChild(descriptionDiv);
+
+    if (!isTerminal && node.last_action && node.last_action !== "Waiting") {
+        const actionDiv = document.createElement("div");
+        actionDiv.className = "card-action-html";
+        actionDiv.textContent = node.last_action;
+        card.appendChild(actionDiv);
+    }
+
+    // 6. Tool Activity List
     const runs = getNodeToolRuns(node);
     if (runs.length > 0) {
-        let currentY = baseHeight + 12;
+        const toolsContainer = document.createElement("div");
+        toolsContainer.className = "card-tools-html";
+
+        const toolsTitle = document.createElement("div");
+        toolsTitle.className = "card-tools-title";
+        toolsTitle.textContent = `Tool Activity (${runs.length})`;
+        toolsContainer.appendChild(toolsTitle);
+
         runs.forEach((run) => {
             const isExpanded = state.expandedToolRuns.has(run.id);
             const descText = getToolDescription(run);
-            const runHeight = isExpanded ? 208 : (descText ? 44 : 36);
-
-            const fo = createSvg(
-                "foreignObject",
-                {
-                    x: 10,
-                    y: currentY,
-                    width: box.width - 20,
-                    height: runHeight,
-                },
-                group,
-            );
 
             const div = document.createElement("div");
             div.className = `tool-run-item ${toolRunStatus(run)}${isExpanded ? " expanded" : ""}`;
-            div.style.height = `${runHeight}px`;
             div.dataset.runId = run.id;
 
             div.addEventListener("wheel", (e) => {
@@ -3085,26 +2673,26 @@ function drawNode(node, box) {
                 e.stopPropagation();
             });
 
-            const header = document.createElement("div");
-            header.className = "tool-run-header";
+            const runHeader = document.createElement("div");
+            runHeader.className = "tool-run-header";
 
-            const dot = document.createElement("span");
-            dot.className = "tool-run-dot";
+            const runDot = document.createElement("span");
+            runDot.className = "tool-run-dot";
 
             const titleWrap = document.createElement("div");
             titleWrap.className = "tool-run-title-wrap";
 
-            const title = document.createElement("span");
-            title.className = "tool-run-title";
-            title.textContent = run.tool_name || "tool";
-            titleWrap.append(title);
+            // const runTitle = document.createElement("span");
+            // runTitle.className = "tool-run-title";
+            // runTitle.textContent = run.tool_name || "tool";
+            // titleWrap.appendChild(runTitle);
 
             if (descText) {
                 const desc = document.createElement("span");
                 desc.className = "tool-run-desc";
                 desc.textContent = descText;
                 div.title = descText;
-                titleWrap.append(desc);
+                titleWrap.appendChild(desc);
             } else {
                 enqueueToolDescription(run);
             }
@@ -3113,10 +2701,12 @@ function drawNode(node, box) {
             caret.className = "tool-run-caret";
             caret.textContent = isExpanded ? "▼" : "▶";
 
-            header.append(dot, titleWrap, caret);
-            div.append(header);
+            runHeader.appendChild(runDot);
+            runHeader.appendChild(titleWrap);
+            runHeader.appendChild(caret);
+            div.appendChild(runHeader);
 
-            header.addEventListener("click", (e) => {
+            runHeader.addEventListener("click", (e) => {
                 e.stopPropagation();
                 toggleToolRun(run.id);
             });
@@ -3124,6 +2714,17 @@ function drawNode(node, box) {
             if (isExpanded) {
                 const body = document.createElement("div");
                 body.className = "tool-run-body";
+
+                const infoBar = document.createElement("div");
+                infoBar.className = "tool-run-info-bar";
+                infoBar.style.fontSize = "9px";
+                infoBar.style.fontWeight = "750";
+                infoBar.style.color = "#94a3b8";
+                infoBar.style.borderBottom = "1px solid #334155";
+                infoBar.style.paddingBottom = "6px";
+                infoBar.style.marginBottom = "4px";
+                infoBar.textContent = `Tool: ${run.tool_name || "tool"} | Call: ${run.id || "n/a"}`;
+                body.appendChild(infoBar);
 
                 const inputSection = document.createElement("div");
                 inputSection.className = "tool-run-section";
@@ -3133,7 +2734,8 @@ function drawNode(node, box) {
                 const inputVal = document.createElement("pre");
                 inputVal.className = "tool-run-val";
                 inputVal.textContent = formatToolValue(run.input);
-                inputSection.append(inputLabel, inputVal);
+                inputSection.appendChild(inputLabel);
+                inputSection.appendChild(inputVal);
 
                 const outputSection = document.createElement("div");
                 outputSection.className = "tool-run-section";
@@ -3143,16 +2745,21 @@ function drawNode(node, box) {
                 const outputVal = document.createElement("pre");
                 outputVal.className = "tool-run-val";
                 outputVal.textContent = formatToolValue(run.output);
-                outputSection.append(outputLabel, outputVal);
+                outputSection.appendChild(outputLabel);
+                outputSection.appendChild(outputVal);
 
-                body.append(inputSection, outputSection);
-                div.append(body);
+                body.appendChild(inputSection);
+                body.appendChild(outputSection);
+                div.appendChild(body);
             }
 
-            fo.appendChild(div);
-            currentY += runHeight + 8;
+            toolsContainer.appendChild(div);
         });
+
+        card.appendChild(toolsContainer);
     }
+
+    els.svg.appendChild(card);
 }
 
 let userHasInteracted = false;
@@ -3169,8 +2776,10 @@ els.stage.addEventListener(
     { once: true },
 );
 
+let stageScrollTop = 0;
 const savedScrolls = new Map();
 function saveScrollPositions() {
+    stageScrollTop = els.stage ? els.stage.scrollTop : 0;
     savedScrolls.clear();
     els.svg.querySelectorAll(".tool-run-item").forEach((item) => {
         const runId = item.dataset.runId;
@@ -3190,6 +2799,9 @@ function saveScrollPositions() {
 }
 
 function restoreScrollPositions() {
+    if (els.stage) {
+        els.stage.scrollTop = stageScrollTop;
+    }
     els.svg.querySelectorAll(".tool-run-item").forEach((item) => {
         const runId = item.dataset.runId;
         if (!runId) return;
@@ -3215,34 +2827,18 @@ function restoreScrollPositions() {
 
 function renderGraph() {
     const nodes = state.graph.nodes || [];
-    const edges = state.graph.edges || [];
     saveScrollPositions();
     els.svg.replaceChildren();
 
     els.empty.classList.toggle("hidden", nodes.length > 0);
     if (!nodes.length) {
-        zoomPan.contentW = 960;
-        zoomPan.contentH = 520;
-        if (!userHasInteracted) fitToView(false);
-        applyViewBox();
         return;
     }
 
-    const { layout, width, height } = buildLayout(nodes, edges);
-
-    zoomPan.contentW = width;
-    zoomPan.contentH = height;
-
-    edges.forEach((edge) => drawEdge(edge, layout));
     nodes.forEach((node) => {
-        const box = layout.get(node.id);
-        if (box) drawNode(node, box);
+        drawNode(node);
     });
 
-    if (!userHasInteracted) {
-        fitToView(false);
-    }
-    applyViewBox();
     restoreScrollPositions();
 }
 
@@ -3943,7 +3539,12 @@ document.addEventListener("keydown", (event) => {
     }
 });
 
-setInterval(render, 1000);
+setInterval(() => {
+    const hasActiveAgents = !replay.active && state.graph.active_count > 0;
+    if (hasActiveAgents) {
+        render();
+    }
+}, 1000);
 
 // Resizing Logic for Panes
 function setupResizers() {

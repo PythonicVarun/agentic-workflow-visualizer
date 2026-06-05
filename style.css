@@ -311,20 +311,18 @@ h2 {
 
 .graph-stage {
     min-height: 0;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
-    cursor: grab;
+    cursor: default;
 }
 
 .graph-stage.grabbing {
-    cursor: grabbing;
+    cursor: default;
 }
 
 #graph {
-    display: block;
-    height: 100%;
-    min-height: 0;
-    width: 100%;
+    display: none;
 }
 
 .zoom-controls {
@@ -885,7 +883,7 @@ dd {
 
 .tool-history-card-desc {
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.84rem;
     line-height: 1.45;
     word-break: break-word;
 }
@@ -2058,12 +2056,12 @@ body.resizing-row * {
 .tool-run-desc {
     font-weight: 500;
     color: #64748b;
-    font-size: 9px;
+    font-size: 0.65rem;
     line-height: 1.25;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    margin-top: 1px;
+    /* margin-top: 1px; */
 }
 
 .tool-run-caret {
@@ -2133,4 +2131,253 @@ body.resizing-row * {
 .tool-run-body::-webkit-scrollbar-thumb:hover,
 .tool-run-val::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Linear Flow container */
+.linear-flow-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* Linear node card style */
+.node-card-html {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    cursor: pointer;
+}
+
+.node-card-html:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 40px rgb(24 33 43 / 14%);
+    border-color: var(--accent);
+}
+
+.node-card-html.selected {
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15), var(--shadow);
+}
+
+/* Highlight flash animation */
+@keyframes highlightFlash {
+    0% {
+        background-color: var(--surface);
+    }
+    30% {
+        background-color: rgba(15, 118, 110, 0.15);
+    }
+    100% {
+        background-color: var(--surface);
+    }
+}
+
+.node-card-html.highlight-flash {
+    animation: highlightFlash 1.2s ease;
+}
+
+/* Card Header */
+.card-header-html {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid var(--surface-strong);
+    padding-bottom: 12px;
+}
+
+.card-title-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Pulsing dot for running agents */
+.card-running-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--running);
+    display: none;
+}
+
+.node-card-html.running .card-running-dot {
+    display: block;
+    animation: pulse-html 1.25s ease-in-out infinite;
+}
+
+@keyframes pulse-html {
+    0%, 100% {
+        transform: scale(0.9);
+        opacity: 0.4;
+    }
+    50% {
+        transform: scale(1.3);
+        opacity: 1;
+    }
+}
+
+.card-title-text {
+    font-size: 1.05rem;
+    font-weight: 850;
+    color: var(--ink);
+}
+
+.card-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-badge {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+}
+
+.card-badge.role {
+    background-color: var(--surface-strong);
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+
+.card-badge.status {
+    background-color: #ffffff;
+    border: 1px solid transparent;
+}
+
+.node-card-html.running .card-badge.status {
+    background-color: var(--running-soft);
+    color: var(--running);
+    border-color: var(--running);
+}
+
+.node-card-html.complete .card-badge.status {
+    background-color: var(--complete-soft);
+    color: var(--complete);
+    border-color: var(--complete);
+}
+
+.node-card-html.failed .card-badge.status {
+    background-color: var(--failed-soft);
+    color: var(--failed);
+    border-color: var(--failed);
+}
+
+.node-card-html.pending .card-badge.status {
+    background-color: var(--pending-soft);
+    color: var(--pending);
+    border-color: var(--pending);
+}
+
+/* Card Meta Data (e.g. model, elapsed time) */
+.card-meta-html {
+    display: flex;
+    gap: 16px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-weight: 650;
+}
+
+.card-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* Spawn relationships links */
+.card-relations-html {
+    display: flex;
+    flex-direction: row;
+    gap: 0.25rem;
+    font-size: 0.82rem;
+    background: var(--surface-strong);
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+}
+
+.card-relations-html a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.card-relations-html a:hover {
+    text-decoration: underline;
+}
+
+/* Spawn prompt styling */
+.card-prompt-html {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.card-prompt-label {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.card-prompt-text {
+    font-size: 0.88rem;
+    line-height: 1.4;
+    color: var(--ink);
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: inherit;
+}
+
+/* Description / Last Action styling */
+.card-description-html {
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.card-action-html {
+    font-size: 0.82rem;
+    background-color: rgba(15, 118, 110, 0.05);
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px;
+    color: #273241;
+    font-weight: 700;
+    border-radius: 0 6px 6px 0;
+}
+
+/* Tool runs nested section styling */
+.card-tools-html {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.card-tools-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
 }
