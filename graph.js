@@ -46,6 +46,8 @@ const sessionLibrary = {
     sessionMap: new Map(),
     childMap: new Map(),
     importedParsedFiles: [],
+    appendFolderUpload: false,
+    initialSessionId: null,
 };
 
 const els = {
@@ -1613,8 +1615,9 @@ function formatReplayFilePath(file) {
 
 function setReplayDropnote(message = "", tone = "default") {
     if (!els.replayDropnote) return;
+
     const detail = String(message || "").trim();
-    els.replayDropnote.textContent = detail
+    els.replayDropnote.innerHTML = detail
         ? `${detail} ${replayDropnoteBaseText}`.trim()
         : replayDropnoteBaseText;
     els.replayDropnote.classList.toggle("is-warning", tone === "warning");
@@ -2130,9 +2133,13 @@ async function loadIndexedLogs() {
 }
 
 function primarySessions() {
-    return sessionLibrary.sessions.filter(
+    const allPrimary = sessionLibrary.sessions.filter(
         (session) => session.threadSource !== "subagent",
     );
+    if (sessionLibrary.initialSessionId) {
+        return allPrimary.filter((session) => session.id === sessionLibrary.initialSessionId);
+    }
+    return allPrimary;
 }
 
 function spawnedSubagentCount(sessionId) {
@@ -2161,7 +2168,7 @@ function renderSessionLibrary() {
 
     els.sessionLibraryTitle.textContent = isCodexMode
         ? "Codex Sessions"
-        : "Demo Logs";
+        : (sessionLibrary.importedParsedFiles.length > 0 ? "Log Files" : "Demo Logs");
     count.textContent = String(isCodexMode ? sessions.length : files.length);
 
     if (!sessionLibrary.loaded) {
@@ -2635,6 +2642,11 @@ async function handleReplaySelection(fileList, source = "files", append = false)
 
     if (codexSessions.length) {
         sessionLibrary.mode = "codex";
+        if (files.length === 1 && !append) {
+            sessionLibrary.initialSessionId = codexSessions[0].id;
+        } else if (!append) {
+            sessionLibrary.initialSessionId = null;
+        }
         rebuildSessionLibrary(codexSessions);
         renderSessionLibrary();
 
@@ -2651,7 +2663,7 @@ async function handleReplaySelection(fileList, source = "files", append = false)
             }
             els.subagentPromptBanner?.classList.remove("hidden");
 
-            if (files.length === 1) {
+            if (files.length === 1 || append) {
                 openSubagentWarningModal(`This log file spawned subagent(s) (${labelStr}) whose execution details are missing.\n\nPlease upload the subagent log file(s) (expected: ${fileStr}).`);
             }
         } else {
@@ -2672,6 +2684,123 @@ async function handleReplaySelection(fileList, source = "files", append = false)
     const firstFile = sessionLibrary.files[0];
     if (firstFile) {
         await replayFileEntry(firstFile.id, files.length === 1);
+    }
+}
+
+async function handleDirectorySelection(fileList) {
+    const allFiles = Array.from(fileList || []).filter(Boolean);
+    if (!allFiles.length) return;
+
+    // Filter files: must end with .jsonl
+    const targetFiles = allFiles.filter((file) => {
+        const name = String(file.name || "").toLowerCase();
+        return name.endsWith(".jsonl");
+    });
+
+    if (!targetFiles.length) {
+        throw new Error("No valid Codex history/log files were found in the selected directory.");
+    }
+
+    const settled = await Promise.allSettled(
+        targetFiles.map(async (file) => {
+            const text = await file.text();
+            const entries = parseLogEntries(text);
+            return { file, text, entries };
+        })
+    );
+
+    const parsedFiles = [];
+    const report = {
+        unreadable: [],
+        invalid: [],
+        unsupported: [],
+    };
+
+    settled.forEach((result, index) => {
+        const file = targetFiles[index];
+        if (result.status === "fulfilled") {
+            const { text, entries } = result.value;
+            try {
+                const events = extractEventsFromEntries(entries);
+                if (events && events.length > 0) {
+                    parsedFiles.push({ file, text, entries });
+                } else {
+                    report.invalid.push({ file, reason: "No valid Codex history or visualizer events found." });
+                }
+            } catch (error) {
+                report.invalid.push({ file, reason: error instanceof Error ? error.message : String(error) });
+            }
+        } else {
+            const reason = result.reason instanceof Error ? result.reason.message : String(result.reason || "Unknown error.");
+            const issue = { file, reason };
+            if (/read|permission|notreadable|acquired/i.test(reason)) {
+                report.unreadable.push(issue);
+            } else {
+                report.invalid.push(issue);
+            }
+        }
+    });
+
+    if (!parsedFiles.length) {
+        throw new Error("No valid Codex history/log files were found in the selected directory.");
+    }
+
+    const importSummary = summarizeReplayImportIssues(report, "folder");
+    setReplayDropnote(importSummary, importSummary ? "warning" : "default");
+
+    if (sessionLibrary.appendFolderUpload) {
+        const mergedMap = new Map();
+        sessionLibrary.importedParsedFiles.forEach((item) => {
+            mergedMap.set(item.file.name, item);
+        });
+        parsedFiles.forEach((item) => {
+            mergedMap.set(item.file.name, item);
+        });
+        sessionLibrary.importedParsedFiles = Array.from(mergedMap.values());
+    } else {
+        sessionLibrary.importedParsedFiles = [...parsedFiles];
+    }
+
+    const codexSessions = sessionLibrary.importedParsedFiles
+        .map(({ file, entries }) => buildCodexSessionDescriptor(file, entries))
+        .filter(Boolean);
+
+    if (codexSessions.length) {
+        sessionLibrary.mode = "codex";
+        rebuildSessionLibrary(codexSessions);
+        renderSessionLibrary();
+
+        // Check for missing subagents
+        const missingSubagents = getMissingSubagents(codexSessions);
+        if (missingSubagents.length > 0) {
+            const labelStr = missingSubagents.map((s) => s.label).join(", ");
+            const mainFile = parsedFiles[0]?.file || (codexSessions[0] ? { name: codexSessions[0].fileName } : null);
+            const mainFilename = mainFile ? mainFile.name : "rollout.jsonl";
+            const fileStr = missingSubagents.map((s) => getSubagentExpectedFilename(mainFilename, s.id)).join(", ");
+
+            if (els.subagentPromptText) {
+                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
+            }
+            els.subagentPromptBanner?.classList.remove("hidden");
+            openSubagentWarningModal(`This log file spawned subagent(s) (${labelStr}) whose execution details are missing.\n\nPlease upload the subagent log file(s) (expected: ${fileStr}).`);
+        } else {
+            els.subagentPromptBanner?.classList.add("hidden");
+        }
+
+        const firstSession = primarySessions()[0];
+        if (firstSession) {
+            replayCodexSession(firstSession.id);
+        }
+        return;
+    }
+
+    els.subagentPromptBanner?.classList.add("hidden");
+    sessionLibrary.mode = "files";
+    rebuildFileLibrary(sessionLibrary.importedParsedFiles);
+    renderSessionLibrary();
+    const firstFile = sessionLibrary.files[0];
+    if (firstFile) {
+        await replayFileEntry(firstFile.id, parsedFiles.length === 1);
     }
 }
 
@@ -4234,19 +4363,23 @@ els.configModal?.addEventListener("click", (event) => {
 els.llmConfigForm?.addEventListener("submit", saveLLMConfigFromForm);
 els.llmConfigClear?.addEventListener("click", clearSavedLLMConfig);
 els.pickLogFiles?.addEventListener("click", () => els.replayFile.click());
-els.pickLogFolder?.addEventListener("click", () => els.replayFolder.click());
+els.pickLogFolder?.addEventListener("click", () => {
+    sessionLibrary.appendFolderUpload = false;
+    sessionLibrary.initialSessionId = null;
+    els.replayFolder.click();
+});
 
 // Populate the replay drop-note with the OS-appropriate sessions path.
 {
     const ua = navigator.userAgent || "";
     let sessionsPath;
     if (/windows/i.test(ua)) {
-        sessionsPath = "`%USERPROFILE%\\.codex\\sessions`";
+        sessionsPath = '<code class="inline-code">%USERPROFILE%\\.codex\\sessions</code>';
     } else if (/macintosh|mac os|iphone|ipad|ipod/i.test(ua)) {
-        sessionsPath = "`~/.codex/sessions`";
+        sessionsPath = '<code class="inline-code">~/.codex/sessions</code>';
     } else {
         // Linux and other Unix-like systems
-        sessionsPath = "`~/.codex/sessions`";
+        sessionsPath = '<code class="inline-code">~/.codex/sessions</code>';
     }
     replayDropnoteBaseText =
         `Load files from ${sessionsPath}. ` +
@@ -4272,7 +4405,7 @@ els.replayFile.addEventListener("change", async (event) => {
 });
 els.replayFolder.addEventListener("change", async (event) => {
     try {
-        await handleReplaySelection(event.target.files || [], "folder");
+        await handleDirectorySelection(event.target.files || []);
     } catch (error) {
         window.alert(error instanceof Error ? error.message : "Replay failed.");
     } finally {
@@ -4280,7 +4413,10 @@ els.replayFolder.addEventListener("change", async (event) => {
     }
 });
 els.subagentUploadFiles?.addEventListener("click", () => els.subagentFileInput?.click());
-els.subagentUploadFolder?.addEventListener("click", () => els.replayFolder?.click());
+els.subagentUploadFolder?.addEventListener("click", () => {
+    sessionLibrary.appendFolderUpload = true;
+    els.replayFolder?.click();
+});
 els.subagentPromptDismiss?.addEventListener("click", () => {
     els.subagentPromptBanner?.classList.add("hidden");
 });
@@ -4297,6 +4433,7 @@ els.subagentWarningModalUpload?.addEventListener("click", () => {
 });
 els.subagentWarningModalFolder?.addEventListener("click", () => {
     closeSubagentWarningModal();
+    sessionLibrary.appendFolderUpload = true;
     els.replayFolder?.click();
 });
 els.subagentFileInput?.addEventListener("change", async (event) => {
@@ -4319,10 +4456,92 @@ els.subagentFileInput?.addEventListener("change", async (event) => {
         els.replayDropzone.classList.remove("dragover");
     });
 });
+
+async function getFilesFromEntry(entry) {
+    if (entry.isFile) {
+        return new Promise((resolve) => {
+            entry.file(
+                (file) => resolve([file]),
+                () => resolve([])
+            );
+        });
+    } else if (entry.isDirectory) {
+        const dirReader = entry.createReader();
+        const files = [];
+
+        const readEntriesBatch = () => {
+            return new Promise((resolve) => {
+                dirReader.readEntries(
+                    async (entries) => {
+                        if (entries.length === 0) {
+                            resolve([]);
+                        } else {
+                            const childFilesPromises = entries.map(child => getFilesFromEntry(child));
+                            const results = await Promise.all(childFilesPromises);
+                            results.forEach((childFiles, index) => {
+                                const child = entries[index];
+                                childFiles.forEach(f => {
+                                    if (!f.webkitRelativePath) {
+                                        Object.defineProperty(f, 'webkitRelativePath', {
+                                            value: entry.name + '/' + (child.fullPath || child.name).replace(/^\//, ''),
+                                            writable: false,
+                                            enumerable: true,
+                                            configurable: true
+                                        });
+                                    }
+                                });
+                                files.push(...childFiles);
+                            });
+                            const nextBatch = await readEntriesBatch();
+                            files.push(...nextBatch);
+                            resolve(files);
+                        }
+                    },
+                    () => resolve([])
+                );
+            });
+        };
+
+        await readEntriesBatch();
+        return files;
+    }
+    return [];
+}
+
 els.replayDropzone.addEventListener("drop", async (event) => {
     event.preventDefault();
     els.replayDropzone.classList.remove("dragover");
-    await handleSelectedFiles(Array.from(event.dataTransfer?.files || []));
+
+    const items = Array.from(event.dataTransfer?.items || []);
+    if (items.length > 0) {
+        const files = [];
+        let hasFolder = false;
+        for (const item of items) {
+            if (item.kind === "file") {
+                const entry = item.webkitGetAsEntry();
+                if (entry) {
+                    if (entry.isDirectory) {
+                        hasFolder = true;
+                    }
+                    const entryFiles = await getFilesFromEntry(entry);
+                    files.push(...entryFiles);
+                }
+            }
+        }
+        if (files.length > 0) {
+            if (hasFolder) {
+                try {
+                    await handleDirectorySelection(files);
+                } catch (error) {
+                    window.alert(error instanceof Error ? error.message : "Replay failed.");
+                }
+            } else {
+                await handleSelectedFiles(files);
+            }
+        }
+    } else {
+        await handleSelectedFiles(Array.from(event.dataTransfer?.files || []));
+    }
 });
 els.agentModalClose.addEventListener("click", closeAgentModal);
 els.agentModalBackdrop.addEventListener("click", closeAgentModal);

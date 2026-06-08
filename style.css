@@ -1039,11 +1039,16 @@ dd {
     color: var(--accent);
     cursor: pointer;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 800;
     letter-spacing: 0.01em;
     min-height: 38px;
-    padding: 0 12px;
+    padding: 6px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.25;
     transition:
         border-color 0.18s ease,
         background 0.18s ease,
@@ -1069,6 +1074,18 @@ dd {
     line-height: 1.45;
     margin: 0;
     padding: 0 16px 12px;
+}
+
+.inline-code {
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    background-color: var(--surface-strong);
+    color: #0d9488; /* sleek, dark teal matching --accent */
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid rgba(15, 118, 110, 0.15);
+    font-size: 0.9em;
+    font-weight: 600;
+    word-break: break-all;
 }
 
 .replay-dropnote.is-warning {
