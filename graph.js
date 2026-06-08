@@ -72,6 +72,12 @@ const els = {
     subagentUploadFolder: document.querySelector("#subagent-upload-folder"),
     subagentPromptDismiss: document.querySelector("#subagent-prompt-dismiss"),
     subagentFileInput: document.querySelector("#subagent-file-input"),
+    subagentWarningModal: document.querySelector("#subagent-warning-modal"),
+    subagentWarningModalClose: document.querySelector("#subagent-warning-modal-close"),
+    subagentWarningModalBackdrop: document.querySelector("#subagent-warning-modal-backdrop"),
+    subagentWarningModalText: document.querySelector("#subagent-warning-modal-text"),
+    subagentWarningModalUpload: document.querySelector("#subagent-warning-modal-upload"),
+    subagentWarningModalFolder: document.querySelector("#subagent-warning-modal-folder"),
     feed: document.querySelector("#event-feed"),
     selectedTitle: document.querySelector("#selected-title"),
     selectedStatus: document.querySelector("#selected-status"),
@@ -1705,8 +1711,12 @@ async function readReplayImport(fileList, source = "files") {
 }
 
 function extractEventsFromEntries(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return [];
+
+    // 1. Check if they are standard visualizer hook events (either direct or nested)
     const events = [];
     for (const entry of entries) {
+        if (!entry) continue;
         if (entry.event_type) {
             events.push(entry);
             continue;
@@ -1719,7 +1729,136 @@ function extractEventsFromEntries(entries) {
             events.push(entry.event);
         }
     }
-    return events;
+    if (events.length > 0) {
+        return events;
+    }
+
+    // 2. Check if they are Codex session entries (e.g. they have type: "event_msg", "response_item", etc.)
+    const hasCodexEntries = entries.some(
+        (entry) =>
+            entry &&
+            (entry.type === "event_msg" ||
+                entry.type === "response_item" ||
+                entry.type === "session_meta"),
+    );
+    if (hasCodexEntries) {
+        const meta = getCodexSessionMeta(entries) || {
+            id: "temp_session_" + Math.random().toString(36).substring(2, 11),
+            timestamp: entries[0]?.timestamp || isoNow(),
+        };
+        const session = {
+            id: meta.id,
+            parentSessionId: meta.forked_from_id || null,
+            nickname: meta.agent_nickname || null,
+            role: meta.agent_role || "primary",
+            startedAt: meta.timestamp || entries[0]?.timestamp || isoNow(),
+            entries,
+            meta,
+        };
+        const spawnHints = new Map();
+        if (meta.source?.subagent?.thread_spawn) {
+            const spawnInfo = meta.source.subagent.thread_spawn;
+            spawnHints.set(meta.id, {
+                nickname: spawnInfo.agent_nickname,
+                prompt: spawnInfo.message,
+            });
+        }
+        return translateCodexSession(session, session.id, spawnHints);
+    }
+
+    // 3. Check if they are standard agent transcript entries (e.g. step_index, type: "USER_INPUT"/"PLANNER_RESPONSE")
+    const hasTranscriptEntries = entries.some(
+        (entry) =>
+            entry &&
+            (entry.step_index !== undefined ||
+                entry.source !== undefined ||
+                (entry.type && ["USER_INPUT", "PLANNER_RESPONSE", "SYSTEM", "TOOL_RESPONSE", "TOOL_OUTPUT"].includes(entry.type))),
+    );
+    if (hasTranscriptEntries) {
+        const trEvents = [];
+        const baseTime = entries[0]?.timestamp ? new Date(entries[0].timestamp).getTime() : Date.now();
+        
+        trEvents.push({
+            event_type: "session_start",
+            agent_id: ROOT_AGENT_ID,
+            timestamp: new Date(baseTime).toISOString(),
+            data: {
+                source: "transcript",
+                label: "Primary Agent",
+                role: "primary",
+            },
+        });
+
+        entries.forEach((entry, idx) => {
+            if (!entry) return;
+            const timestamp = entry.timestamp 
+                ? new Date(entry.timestamp).toISOString() 
+                : new Date(baseTime + idx * 1000).toISOString();
+            
+            if (entry.type === "USER_INPUT") {
+                trEvents.push({
+                    event_type: "user_input",
+                    agent_id: ROOT_AGENT_ID,
+                    timestamp,
+                    data: {
+                        prompt: entry.content || "User message",
+                        label: "Primary Agent",
+                        role: "primary",
+                    },
+                });
+            } else if (entry.type === "PLANNER_RESPONSE") {
+                if (Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
+                    entry.tool_calls.forEach((call) => {
+                        trEvents.push({
+                            event_type: "tool_call",
+                            agent_id: ROOT_AGENT_ID,
+                            timestamp,
+                            data: {
+                                tool_name: call.name || call.function?.name || "tool",
+                                args: call.arguments || call.function?.arguments || {},
+                                call_id: call.id,
+                            },
+                        });
+                    });
+                }
+                if (entry.content) {
+                    trEvents.push({
+                        event_type: "agent_output",
+                        agent_id: ROOT_AGENT_ID,
+                        timestamp,
+                        data: {
+                            output: entry.content,
+                            status: "running",
+                        },
+                    });
+                }
+            } else if (entry.type === "TOOL_RESPONSE" || entry.type === "TOOL_OUTPUT") {
+                trEvents.push({
+                    event_type: "tool_output",
+                    agent_id: ROOT_AGENT_ID,
+                    timestamp,
+                    data: {
+                        tool_name: entry.tool_name || "tool",
+                        output: entry.content || "",
+                        call_id: entry.tool_use_id || entry.id,
+                    },
+                });
+            } else if (entry.type === "SYSTEM") {
+                trEvents.push({
+                    event_type: "agent_output",
+                    agent_id: ROOT_AGENT_ID,
+                    timestamp,
+                    data: {
+                        output: entry.content || "System event",
+                        status: "running",
+                    },
+                });
+            }
+        });
+        return trEvents;
+    }
+
+    return [];
 }
 
 function getCodexSessionMeta(entries) {
@@ -1752,8 +1891,43 @@ function getMissingSubagents(sessions) {
     const spawnedAgentLabelMap = new Map();
 
     sessions.forEach((session) => {
+        const pendingCalls = new Map();
+
         (session.entries || []).forEach((entry) => {
             if (!entry) return;
+
+            // Handle Codex session entries (type === "response_item")
+            if (entry.type === "response_item" && entry.payload) {
+                const payload = entry.payload;
+                if (
+                    (payload.type === "function_call" ||
+                        payload.type === "custom_tool_call") &&
+                    payload.call_id
+                ) {
+                    const parsedArgs = parseToolPayload(payload.arguments || payload.input);
+                    pendingCalls.set(payload.call_id, {
+                        name: payload.name || "tool",
+                        args: parsedArgs,
+                    });
+                } else if (
+                    payload.call_id &&
+                    (payload.type === "function_call_output" ||
+                        payload.type === "custom_tool_call_output" ||
+                        payload.type === "tool_search_output")
+                ) {
+                    const pending = pendingCalls.get(payload.call_id);
+                    const output = parseToolPayload(payload.output);
+                    const toolName = codexToolOutputName(payload.type, pending?.name);
+                    if (toolName === "spawn_agent" && output?.agent_id) {
+                        spawnedAgentIds.add(output.agent_id);
+                        const label = output.nickname || pending?.args?.agent_nickname || null;
+                        if (label) {
+                            spawnedAgentLabelMap.set(output.agent_id, label);
+                        }
+                    }
+                }
+            }
+
             let event = entry;
             if (
                 entry.event &&
@@ -2404,13 +2578,13 @@ function replayCodexSession(sessionId) {
     );
 }
 
-function replayFileEntry(fileId) {
+function replayFileEntry(fileId, showPopup = false) {
     const entry = sessionLibrary.files.find((item) => item.id === fileId);
     if (!entry) return;
     sessionLibrary.selectedFileId = fileId;
     renderSessionLibrary();
     if (entry.text) {
-        return replayLogContent(entry.text, entry.fileName);
+        return replayLogContent(entry.text, entry.fileName, showPopup);
     }
     if (!entry.fetchUrl) {
         throw new Error(`No replay content is available for ${entry.fileName}.`);
@@ -2421,7 +2595,7 @@ function replayFileEntry(fileId) {
                 throw new Error(`Failed to load ${entry.fileName} from logs folder.`);
             }
             entry.text = await response.text();
-            return replayLogContent(entry.text, entry.fileName);
+            return replayLogContent(entry.text, entry.fileName, showPopup);
         });
 }
 
@@ -2463,10 +2637,18 @@ async function handleReplaySelection(fileList, source = "files", append = false)
         const missingSubagents = getMissingSubagents(codexSessions);
         if (missingSubagents.length > 0) {
             const labelStr = missingSubagents.map((s) => s.label).join(", ");
+            const mainFile = files[0] || (codexSessions[0] ? { name: codexSessions[0].fileName } : null);
+            const mainFilename = mainFile ? mainFile.name : "rollout.jsonl";
+            const fileStr = missingSubagents.map((s) => getSubagentExpectedFilename(mainFilename, s.id)).join(", ");
+
             if (els.subagentPromptText) {
-                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing. Please upload the subagent log file(s), or upload the whole sessions folder.`;
+                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
             }
             els.subagentPromptBanner?.classList.remove("hidden");
+
+            if (files.length === 1) {
+                openSubagentWarningModal(`This log file spawned subagent(s) (${labelStr}) whose execution details are missing.\n\nPlease upload the subagent log file(s) (expected: ${fileStr}).`);
+            }
         } else {
             els.subagentPromptBanner?.classList.add("hidden");
         }
@@ -2484,7 +2666,7 @@ async function handleReplaySelection(fileList, source = "files", append = false)
     renderSessionLibrary();
     const firstFile = sessionLibrary.files[0];
     if (firstFile) {
-        await replayFileEntry(firstFile.id);
+        await replayFileEntry(firstFile.id, files.length === 1);
     }
 }
 
@@ -2675,6 +2857,20 @@ function closeConfigModal() {
     els.configModal.classList.add("hidden");
     els.configModal.setAttribute("aria-hidden", "true");
 }
+
+function openSubagentWarningModal(message) {
+    if (els.subagentWarningModalText) {
+        els.subagentWarningModalText.textContent = message;
+    }
+    els.subagentWarningModal?.classList.remove("hidden");
+    els.subagentWarningModal?.setAttribute("aria-hidden", "false");
+}
+
+function closeSubagentWarningModal() {
+    els.subagentWarningModal?.classList.add("hidden");
+    els.subagentWarningModal?.setAttribute("aria-hidden", "true");
+}
+
 
 function buildAgentModalRenderKey(node) {
     const presentation = getNodePresentation(node);
@@ -3669,7 +3865,11 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-async function replayLogContent(content, filename) {
+function getSubagentExpectedFilename(mainFilename, spawnedAgentId) {
+    return `*${spawnedAgentId}.jsonl`;
+}
+
+async function replayLogContent(content, filename, showPopup = false) {
     const entries = parseLogEntries(content);
     const events = extractEventsFromEntries(entries);
     if (!events.length) {
@@ -3689,6 +3889,64 @@ async function replayLogContent(content, filename) {
     }
 
     replayLoadEvents(events, filename);
+
+    // Check for missing subagents in individual uploaded file mode
+    const spawnedAgentIds = new Set();
+    const spawnedAgentLabelMap = new Map();
+
+    events.forEach((event) => {
+        if (!event) return;
+        if (event.event_type === "tool_output" && event.data) {
+            const data = event.data;
+            if (data.spawned_agent_id) {
+                spawnedAgentIds.add(data.spawned_agent_id);
+                if (data.spawned_agent_label) {
+                    spawnedAgentLabelMap.set(data.spawned_agent_id, data.spawned_agent_label);
+                }
+            }
+        }
+        if (event.event_type === "subagent_spawn" && event.agent_id) {
+            spawnedAgentIds.add(event.agent_id);
+            if (event.data?.name || event.data?.label) {
+                spawnedAgentLabelMap.set(event.agent_id, event.data.name || event.data.label);
+            }
+        }
+    });
+
+    const loadedFileNames = new Set(
+        sessionLibrary.files.map((f) => f.fileName.toLowerCase())
+    );
+
+    const missingSubagents = [];
+    spawnedAgentIds.forEach((spawnedId) => {
+        const isLoaded = Array.from(loadedFileNames).some(
+            (name) => name.includes(spawnedId.toLowerCase())
+        );
+        if (!isLoaded) {
+            missingSubagents.push({
+                id: spawnedId,
+                label: spawnedAgentLabelMap.get(spawnedId) || humanize(spawnedId),
+                expectedFilename: getSubagentExpectedFilename(filename, spawnedId),
+            });
+        }
+    });
+
+    if (missingSubagents.length > 0) {
+        const labelStr = missingSubagents.map((s) => s.label).join(", ");
+        const fileStr = missingSubagents.map((s) => s.expectedFilename).join(", ");
+        
+        // Show banner in the UI
+        if (els.subagentPromptText) {
+            els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
+        }
+        els.subagentPromptBanner?.classList.remove("hidden");
+
+        if (showPopup) {
+            openSubagentWarningModal(`This log file spawned subagent(s) (${labelStr}) whose execution details are missing.\n\nPlease upload the subagent log file(s) (expected: ${fileStr}).`);
+        }
+    } else {
+        els.subagentPromptBanner?.classList.add("hidden");
+    }
 }
 
 els.demoButton?.addEventListener("click", () => postCommand("/demo"));
@@ -3754,6 +4012,21 @@ els.subagentUploadFolder?.addEventListener("click", () => els.replayFolder?.clic
 els.subagentPromptDismiss?.addEventListener("click", () => {
     els.subagentPromptBanner?.classList.add("hidden");
 });
+els.subagentWarningModalClose?.addEventListener("click", closeSubagentWarningModal);
+els.subagentWarningModalBackdrop?.addEventListener("click", closeSubagentWarningModal);
+els.subagentWarningModal?.addEventListener("click", (event) => {
+    if (event.target === els.subagentWarningModal) {
+        closeSubagentWarningModal();
+    }
+});
+els.subagentWarningModalUpload?.addEventListener("click", () => {
+    closeSubagentWarningModal();
+    els.subagentFileInput?.click();
+});
+els.subagentWarningModalFolder?.addEventListener("click", () => {
+    closeSubagentWarningModal();
+    els.replayFolder?.click();
+});
 els.subagentFileInput?.addEventListener("change", async (event) => {
     try {
         await handleReplaySelection(event.target.files || [], "files", true);
@@ -3796,6 +4069,10 @@ els.svg.addEventListener("click", (e) => {
 document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !els.configModal.classList.contains("hidden")) {
         closeConfigModal();
+        return;
+    }
+    if (event.key === "Escape" && els.subagentWarningModal && !els.subagentWarningModal.classList.contains("hidden")) {
+        closeSubagentWarningModal();
         return;
     }
     if (event.key === "Escape" && !els.agentModal.classList.contains("hidden")) {

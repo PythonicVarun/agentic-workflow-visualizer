@@ -570,6 +570,57 @@
                 </form>
             </section>
         </div>
+        <div class="config-modal hidden" id="subagent-warning-modal" aria-hidden="true">
+            <div class="agent-modal-backdrop" id="subagent-warning-modal-backdrop"></div>
+            <section
+                class="config-modal-dialog"
+                id="subagent-warning-modal-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="subagent-warning-modal-title"
+                style="max-width: min(580px, 100%); min-width: min(460px, 100%);"
+            >
+                <div class="agent-modal-header">
+                    <div class="agent-modal-title-wrap">
+                        <h2 id="subagent-warning-modal-title">Missing Subagents</h2>
+                        <p class="agent-modal-subtitle">
+                            Spawned subagent execution details are missing.
+                        </p>
+                    </div>
+                    <button
+                        class="agent-modal-close"
+                        id="subagent-warning-modal-close"
+                        type="button"
+                        aria-label="Close modal"
+                    >
+                        <svg
+                            viewBox="0 0 20 20"
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                        >
+                            <line x1="5" y1="5" x2="15" y2="15" />
+                            <line x1="15" y1="5" x2="5" y2="15" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="agent-modal-body" style="padding: 22px; display: grid; gap: 18px;">
+                    <p id="subagent-warning-modal-text" style="margin: 0; line-height: 1.5; font-size: 0.9rem; color: var(--ink);"></p>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
+                        <button id="subagent-warning-modal-upload" class="replay-picker-button" type="button">
+                            Upload Subagent Logs
+                        </button>
+                        <button id="subagent-warning-modal-folder" class="replay-picker-button secondary" type="button">
+                            Upload Sessions Folder
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
         <script type="module" src="./graph.js"></script>
     </body>
 </html>
+
