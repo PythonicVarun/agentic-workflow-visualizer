@@ -123,6 +123,34 @@
                                 </button>
                             </div>
                             <p class="replay-dropnote" id="replay-dropnote"></p>
+                            <div class="subagent-prompt-banner hidden" id="subagent-prompt-banner">
+                                <div class="subagent-prompt-icon">
+                                    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="10" cy="10" r="8" />
+                                        <line x1="10" y1="6" x2="10" y2="10" />
+                                        <circle cx="10" cy="13.5" r="0.5" fill="currentColor" stroke="none" />
+                                    </svg>
+                                </div>
+                                <div class="subagent-prompt-content">
+                                    <p class="subagent-prompt-text" id="subagent-prompt-text"></p>
+                                    <div class="subagent-prompt-actions">
+                                        <button id="subagent-upload-files" class="replay-picker-button" type="button">
+                                            Upload Subagent Files
+                                        </button>
+                                        <button id="subagent-upload-folder" class="replay-picker-button secondary" type="button">
+                                            Upload Sessions Folder
+                                        </button>
+                                    </div>
+                                </div>
+                                <button class="subagent-prompt-dismiss" id="subagent-prompt-dismiss" type="button" aria-label="Dismiss">&times;</button>
+                            </div>
+                            <input
+                                id="subagent-file-input"
+                                type="file"
+                                accept=".jsonl,.ndjson,.json,application/json,text/plain"
+                                multiple
+                                hidden
+                            />
                             <input
                                 id="replay-file"
                                 type="file"

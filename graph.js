@@ -44,6 +44,7 @@ const sessionLibrary = {
     files: [],
     sessionMap: new Map(),
     childMap: new Map(),
+    importedParsedFiles: [],
 };
 
 const els = {
@@ -65,6 +66,12 @@ const els = {
     pickLogFiles: document.querySelector("#pick-log-files"),
     pickLogFolder: document.querySelector("#pick-log-folder"),
     replayDropnote: document.querySelector("#replay-dropnote"),
+    subagentPromptBanner: document.querySelector("#subagent-prompt-banner"),
+    subagentPromptText: document.querySelector("#subagent-prompt-text"),
+    subagentUploadFiles: document.querySelector("#subagent-upload-files"),
+    subagentUploadFolder: document.querySelector("#subagent-upload-folder"),
+    subagentPromptDismiss: document.querySelector("#subagent-prompt-dismiss"),
+    subagentFileInput: document.querySelector("#subagent-file-input"),
     feed: document.querySelector("#event-feed"),
     selectedTitle: document.querySelector("#selected-title"),
     selectedStatus: document.querySelector("#selected-status"),
@@ -776,9 +783,51 @@ function buildSummaryRequestContext(node) {
     ].join("\n");
 }
 
-async function requestNodeSummaryAttempt(node, retryMode = false) {
+async function requestNodeSummariesBatch(nodes, retryMode = false) {
+    if (!hasLLMConfig()) throw new Error("No LLM config");
     const { baseUrl, apiKey, model } = state.llmConfig;
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const url = `${baseUrl}/chat/completions`;
+
+    const nodeMap = new Map();
+    const payloadItems = nodes.map((node) => {
+        const randomId = "req_" + Math.random().toString(36).substring(2, 11);
+        nodeMap.set(randomId, node);
+        return {
+            id: randomId,
+            context: buildSummaryRequestContext(node),
+        };
+    });
+
+    const systemPrompt = `You label software agents by the task they actually performed.
+Given a JSON list of agent context objects, each with a unique "id", return a label ("name") and "description" for each.
+${
+    retryMode
+        ? "Your previous answer for some agents reused the existing agent label, which is incorrect. Make sure the name does NOT repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id."
+        : ""
+}
+The name must describe the completed task, must not repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id, and must be short: 1 to 3 words only.
+The description should be one short sentence describing what the agent did.
+
+Return your response as a single JSON object where the keys are the "id"s of the requests, and the values are JSON objects with exactly two keys: "name" and "description". Do not wrap the object in markdown. Do not add commentary.
+
+Example input:
+[
+  {
+    "id": "req_xyz987",
+    "context": "Agent id: subagent_1\nRole: researcher\nStatus: complete\nSpawn prompt: Find all python files\nObserved tools:\n1. list_dir | input: {}"
+  }
+]
+
+Example response:
+{
+  "req_xyz987": {
+    "name": "Locate Python Files",
+    "description": "Searched the workspace directory to find all Python source files."
+  }
+}
+`;
+
+    const response = await fetch(url, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -787,18 +836,10 @@ async function requestNodeSummaryAttempt(node, retryMode = false) {
         body: JSON.stringify({
             model,
             temperature: 0.2,
+            response_format: { type: "json_object" },
             messages: [
-                {
-                    role: "system",
-                    content:
-                        retryMode
-                            ? "You label software agents by the task they actually performed. Your previous answer reused the existing agent label, which is incorrect. Return only strict JSON as a single object with exactly two top-level keys: name and description. The name must describe the completed task, must not repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id, and must be short: 1 to 3 words only. Do not wrap the object in markdown. Do not add commentary. Do not return an array. If you were about to return a list, return only the best single object instead. The description should be one short sentence describing what the agent did."
-                            : "You label software agents by the task they actually performed. Return only strict JSON as a single object with exactly two top-level keys: name and description. The name must describe the completed task, must not repeat, paraphrase, or closely resemble the existing UI label, nickname, or agent id, and must be short: 1 to 3 words only. Do not wrap the object in markdown. Do not add commentary. Do not return an array. If you were about to return a list, return only the best single object instead. The description should be one short sentence describing what the agent did.",
-                },
-                {
-                    role: "user",
-                    content: buildSummaryRequestContext(node),
-                },
+                { role: "system", content: systemPrompt },
+                { role: "user", content: JSON.stringify(payloadItems, null, 2) },
             ],
         }),
     });
@@ -810,48 +851,45 @@ async function requestNodeSummaryAttempt(node, retryMode = false) {
 
     const payload = await response.json();
     const choice = payload?.choices?.[0];
-    const content =
-        llmContentText(choice?.message?.content) ||
-        String(choice?.message?.content || choice?.text || "").trim();
-    const parsed = parseSummaryPayload(content);
+    const content = String(choice?.message?.content || "").trim();
+    const objectMatch = content.match(/\{[\s\S]*\}/);
+    const parsed = objectMatch ? safeJsonParse(objectMatch[0]) : null;
     if (!parsed) {
         throw new Error("LLM response did not contain valid JSON.");
     }
 
-    return {
-        name: sanitizeSummaryName(parsed.name, fallbackNodeName(node)),
-        description: sanitizeSummaryDescription(
-            parsed.description,
-            fallbackNodeDescription(node),
-        ),
-    };
-}
-
-async function requestNodeSummary(node) {
-    const first = await requestNodeSummaryAttempt(node, false);
-    if (!mirrorsExistingAgentLabel(node, first.name)) {
-        return first;
+    const results = {};
+    for (const [randomId, node] of nodeMap.entries()) {
+        const itemResult = parsed[randomId];
+        if (itemResult && typeof itemResult === "object" && itemResult.name && itemResult.description) {
+            results[node.id] = {
+                name: sanitizeSummaryName(itemResult.name, fallbackNodeName(node)),
+                description: sanitizeSummaryDescription(
+                    itemResult.description,
+                    fallbackNodeDescription(node),
+                ),
+            };
+        } else {
+            results[node.id] = null;
+        }
     }
-
-    const second = await requestNodeSummaryAttempt(node, true);
-    if (!mirrorsExistingAgentLabel(node, second.name)) {
-        return second;
-    }
-
-    throw new Error(
-        "LLM summary name mirrored the existing agent label instead of the completed task.",
-    );
+    return results;
 }
 
 async function processSummaryQueue() {
     if (state.summaryProcessing || !hasLLMConfig()) return;
-    const nextJob = state.summaryQueue.shift();
-    if (!nextJob) return;
-    state.summaryProcessing = true;
-    state.summaryInflight.add(nextJob.nodeId);
-    render();
+    if (state.summaryQueue.length === 0) return;
 
-    try {
+    state.summaryProcessing = true;
+
+    const batchSize = 5;
+    const batchJobs = [];
+    const batchNodes = [];
+
+    while (state.summaryQueue.length > 0 && batchJobs.length < batchSize) {
+        const nextJob = state.summaryQueue.shift();
+        if (!nextJob) continue;
+
         let node;
         if (replay.active && replay.allEvents.length > 0) {
             const fullGraph = buildGraphFromEvents(replay.allEvents, replay.logDetails);
@@ -861,34 +899,102 @@ async function processSummaryQueue() {
                 (item) => item.id === nextJob.nodeId,
             );
         }
-        if (!node) return;
+
+        if (!node) continue;
+
         const currentSignature = buildNodeSummarySignature(node);
         if (currentSignature !== nextJob.signature) {
             enqueueNodeSummary(node);
-            return;
+            continue;
         }
-        const result = await requestNodeSummary(node);
-        state.agentSummaries[node.id] = {
-            signature: currentSignature,
-            status: "ready",
-            name: result.name,
-            description: result.description,
-            updated_at: isoNow(),
-        };
+
+        batchJobs.push(nextJob);
+        batchNodes.push(node);
+        state.summaryInflight.add(node.id);
+    }
+
+    if (batchJobs.length === 0) {
+        state.summaryProcessing = false;
+        return;
+    }
+
+    render();
+
+    try {
+        const firstResults = await requestNodeSummariesBatch(batchNodes, false);
+        const nodesToRetry = [];
+        const finalResults = {};
+
+        for (const node of batchNodes) {
+            const res = firstResults[node.id];
+            if (res && !mirrorsExistingAgentLabel(node, res.name)) {
+                finalResults[node.id] = res;
+            } else {
+                nodesToRetry.push(node);
+            }
+        }
+
+        if (nodesToRetry.length > 0) {
+            try {
+                const secondResults = await requestNodeSummariesBatch(nodesToRetry, true);
+                for (const node of nodesToRetry) {
+                    const res = secondResults[node.id];
+                    if (res && !mirrorsExistingAgentLabel(node, res.name)) {
+                        finalResults[node.id] = res;
+                    } else {
+                        finalResults[node.id] = {
+                            error: "LLM summary name mirrored the existing agent label instead of the completed task.",
+                        };
+                    }
+                }
+            } catch (retryError) {
+                console.error("Retry batch failed:", retryError);
+                for (const node of nodesToRetry) {
+                    finalResults[node.id] = {
+                        error: retryError instanceof Error ? retryError.message : "Summary generation failed during retry.",
+                    };
+                }
+            }
+        }
+
+        for (const job of batchJobs) {
+            const res = finalResults[job.nodeId];
+            if (res && !res.error) {
+                state.agentSummaries[job.nodeId] = {
+                    signature: job.signature,
+                    status: "ready",
+                    name: res.name,
+                    description: res.description,
+                    updated_at: isoNow(),
+                };
+            } else {
+                state.agentSummaries[job.nodeId] = {
+                    signature: job.signature,
+                    status: "error",
+                    error: res?.error || "Summary generation failed.",
+                    updated_at: isoNow(),
+                };
+            }
+        }
         persistAgentSummaries();
     } catch (error) {
-        state.agentSummaries[nextJob.nodeId] = {
-            signature: nextJob.signature,
-            status: "error",
-            error: trim(
-                error instanceof Error ? error.message : "Summary generation failed.",
-                150,
-            ),
-            updated_at: isoNow(),
-        };
+        console.error("Batch summary generation failed:", error);
+        for (const job of batchJobs) {
+            state.agentSummaries[job.nodeId] = {
+                signature: job.signature,
+                status: "error",
+                error: trim(
+                    error instanceof Error ? error.message : "Summary generation failed.",
+                    150,
+                ),
+                updated_at: isoNow(),
+            };
+        }
         persistAgentSummaries();
     } finally {
-        state.summaryInflight.delete(nextJob.nodeId);
+        for (const job of batchJobs) {
+            state.summaryInflight.delete(job.nodeId);
+        }
         state.summaryProcessing = false;
         render();
         if (state.summaryQueue.length) {
@@ -897,23 +1003,35 @@ async function processSummaryQueue() {
     }
 }
 
-async function requestToolDescription(run) {
+async function requestToolDescriptionsBatch(batch) {
     if (!hasLLMConfig()) throw new Error("No LLM config");
     const url = `${state.llmConfig.baseUrl}/chat/completions`;
-    const truncatedInput = trim(formatToolValue(run.input), 1000);
 
-    const systemPrompt = `You are a helpful coding assistant. Given the name of a tool and its input arguments, generate a very short, single-sentence summary of the action being performed (maximum 10 words).
-Return your response as a JSON object with a single key "description". Do not output markdown, wrap it in a raw JSON string.
+    const runMap = new Map();
+    const payloadItems = batch.map((run) => {
+        const randomId = "req_" + Math.random().toString(36).substring(2, 11);
+        runMap.set(randomId, run);
+        const truncatedInput = trim(formatToolValue(run.input), 1000);
+        return {
+            id: randomId,
+            tool_name: run.tool_name,
+            tool_input: truncatedInput,
+        };
+    });
 
-Example:
-Tool Name: list_dir
-Tool Input: {"DirectoryPath": "/workspace/project"}
+    const systemPrompt = `You are a helpful coding assistant. Given a JSON list of tool runs, each with a unique "id", generate a very short, single-sentence summary of the action being performed (maximum 10 words) for each.
+Return your response as a single JSON object where the keys are the "id"s of the requests, and the values are JSON objects with a single key "description". Do not output markdown, wrap it in a raw JSON string.
 
-Response: {"description": "Listing files in project"}
+Example input:
+[
+  {"id": "req_a1b2c3", "tool_name": "list_dir", "tool_input": "{\\"DirectoryPath\\": \\"/workspace/project\\"}"}
+]
+
+Example response:
+{
+  "req_a1b2c3": {"description": "Listing files in project"}
+}
 `;
-
-    const userPrompt = `Tool Name: ${run.tool_name}
-Tool Input: ${truncatedInput}`;
 
     const response = await fetch(url, {
         method: "POST",
@@ -926,7 +1044,7 @@ Tool Input: ${truncatedInput}`;
             response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
+                { role: "user", content: JSON.stringify(payloadItems, null, 2) },
             ],
         }),
     });
@@ -940,10 +1058,20 @@ Tool Input: ${truncatedInput}`;
     const content = String(choice?.message?.content || "").trim();
     const objectMatch = content.match(/\{[\s\S]*\}/);
     const parsed = objectMatch ? safeJsonParse(objectMatch[0]) : null;
-    if (!parsed || !parsed.description) {
+    if (!parsed) {
         throw new Error("Invalid JSON response from LLM");
     }
-    return parsed.description;
+
+    const results = {};
+    for (const [randomId, run] of runMap.entries()) {
+        const itemResult = parsed[randomId];
+        if (itemResult && typeof itemResult === "object" && itemResult.description) {
+            results[run.id] = itemResult.description;
+        } else {
+            results[run.id] = null;
+        }
+    }
+    return results;
 }
 
 function enqueueToolDescription(run) {
@@ -961,27 +1089,57 @@ function enqueueToolDescription(run) {
 
 async function processToolQueue() {
     if (state.toolProcessing || !hasLLMConfig()) return;
-    const run = state.toolQueue.shift();
-    if (!run) return;
+    if (state.toolQueue.length === 0) return;
 
     state.toolProcessing = true;
-    state.toolInflight.add(run.id);
+
+    const batchSize = 20;
+    const batch = [];
+    while (state.toolQueue.length > 0 && batch.length < batchSize) {
+        const run = state.toolQueue.shift();
+        if (run && run.id) {
+            batch.push(run);
+            state.toolInflight.add(run.id);
+        }
+    }
+
+    if (batch.length === 0) {
+        state.toolProcessing = false;
+        return;
+    }
+
+    render();
 
     try {
-        const desc = await requestToolDescription(run);
-        state.toolDescriptions[run.id] = {
-            status: "ready",
-            description: desc,
-        };
+        const results = await requestToolDescriptionsBatch(batch);
+        for (const run of batch) {
+            const desc = results[run.id];
+            if (desc) {
+                state.toolDescriptions[run.id] = {
+                    status: "ready",
+                    description: desc,
+                };
+            } else {
+                state.toolDescriptions[run.id] = {
+                    status: "error",
+                    description: "Failed to generate tool description.",
+                };
+            }
+        }
         persistToolDescriptions();
     } catch (error) {
-        state.toolDescriptions[run.id] = {
-            status: "error",
-            description: "Failed to generate tool description.",
-        };
+        console.error("Batch tool description generation failed:", error);
+        for (const run of batch) {
+            state.toolDescriptions[run.id] = {
+                status: "error",
+                description: "Failed to generate tool description.",
+            };
+        }
         persistToolDescriptions();
     } finally {
-        state.toolInflight.delete(run.id);
+        for (const run of batch) {
+            state.toolInflight.delete(run.id);
+        }
         state.toolProcessing = false;
         render();
         if (state.toolQueue.length) {
@@ -1586,6 +1744,63 @@ function deriveCodexSessionTitle(entries, meta, fallbackName) {
         return `${humanize(meta.agent_nickname)} session`;
     }
     return basename(fallbackName || meta?.id || "codex-session");
+}
+
+function getMissingSubagents(sessions) {
+    const loadedSessionIds = new Set(sessions.map((s) => s.id));
+    const spawnedAgentIds = new Set();
+    const spawnedAgentLabelMap = new Map();
+
+    sessions.forEach((session) => {
+        (session.entries || []).forEach((entry) => {
+            if (!entry) return;
+            let event = entry;
+            if (
+                entry.event &&
+                typeof entry.event === "object" &&
+                entry.event.event_type
+            ) {
+                event = entry.event;
+            }
+            if (event.event_type === "tool_output" && event.data) {
+                const data = event.data;
+                const toolName = data.tool_name || "";
+                if (
+                    (toolName === "spawn_agent" || data.spawned_agent_id) &&
+                    data.spawned_agent_id
+                ) {
+                    spawnedAgentIds.add(data.spawned_agent_id);
+                    if (data.spawned_agent_label) {
+                        spawnedAgentLabelMap.set(
+                            data.spawned_agent_id,
+                            data.spawned_agent_label,
+                        );
+                    }
+                }
+            }
+            if (event.event_type === "subagent_spawn" && event.agent_id) {
+                spawnedAgentIds.add(event.agent_id);
+                if (event.data?.name || event.data?.label) {
+                    spawnedAgentLabelMap.set(
+                        event.agent_id,
+                        event.data.name || event.data.label,
+                    );
+                }
+            }
+        });
+    });
+
+    const missing = [];
+    spawnedAgentIds.forEach((id) => {
+        if (!loadedSessionIds.has(id)) {
+            missing.push({
+                id,
+                label: spawnedAgentLabelMap.get(id) || humanize(id),
+            });
+        }
+    });
+
+    return missing;
 }
 
 function buildCodexSessionDescriptor(file, entries) {
@@ -2210,7 +2425,7 @@ function replayFileEntry(fileId) {
         });
 }
 
-async function handleReplaySelection(fileList, source = "files") {
+async function handleReplaySelection(fileList, source = "files", append = false) {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
 
@@ -2218,19 +2433,54 @@ async function handleReplaySelection(fileList, source = "files") {
     const importSummary = summarizeReplayImportIssues(report, source);
     setReplayDropnote(importSummary, importSummary ? "warning" : "default");
 
-    const codexSessions = parsedFiles
+    if (source === "folder") {
+        sessionLibrary.importedParsedFiles = [...parsedFiles];
+    } else {
+        if (append) {
+            const mergedMap = new Map();
+            sessionLibrary.importedParsedFiles.forEach((item) => {
+                mergedMap.set(item.file.name, item);
+            });
+            parsedFiles.forEach((item) => {
+                mergedMap.set(item.file.name, item);
+            });
+            sessionLibrary.importedParsedFiles = Array.from(mergedMap.values());
+        } else {
+            sessionLibrary.importedParsedFiles = [...parsedFiles];
+        }
+    }
+
+    const codexSessions = sessionLibrary.importedParsedFiles
         .map(({ file, entries }) => buildCodexSessionDescriptor(file, entries))
         .filter(Boolean);
 
-    if (source === "folder" && codexSessions.length) {
+    if (codexSessions.length) {
+        sessionLibrary.mode = "codex";
         rebuildSessionLibrary(codexSessions);
         renderSessionLibrary();
+
+        // Check for missing subagents
+        const missingSubagents = getMissingSubagents(codexSessions);
+        if (missingSubagents.length > 0) {
+            const labelStr = missingSubagents.map((s) => s.label).join(", ");
+            if (els.subagentPromptText) {
+                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing. Please upload the subagent log file(s), or upload the whole sessions folder.`;
+            }
+            els.subagentPromptBanner?.classList.remove("hidden");
+        } else {
+            els.subagentPromptBanner?.classList.add("hidden");
+        }
+
         const firstSession = primarySessions()[0];
-        if (firstSession) replayCodexSession(firstSession.id);
+        if (firstSession) {
+            replayCodexSession(firstSession.id);
+        }
         return;
     }
 
-    rebuildFileLibrary(parsedFiles);
+    els.subagentPromptBanner?.classList.add("hidden");
+    sessionLibrary.mode = "files";
+    rebuildFileLibrary(sessionLibrary.importedParsedFiles);
     renderSessionLibrary();
     const firstFile = sessionLibrary.files[0];
     if (firstFile) {
@@ -3493,6 +3743,20 @@ els.replayFile.addEventListener("change", async (event) => {
 els.replayFolder.addEventListener("change", async (event) => {
     try {
         await handleReplaySelection(event.target.files || [], "folder");
+    } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Replay failed.");
+    } finally {
+        event.target.value = "";
+    }
+});
+els.subagentUploadFiles?.addEventListener("click", () => els.subagentFileInput?.click());
+els.subagentUploadFolder?.addEventListener("click", () => els.replayFolder?.click());
+els.subagentPromptDismiss?.addEventListener("click", () => {
+    els.subagentPromptBanner?.classList.add("hidden");
+});
+els.subagentFileInput?.addEventListener("change", async (event) => {
+    try {
+        await handleReplaySelection(event.target.files || [], "files", true);
     } catch (error) {
         window.alert(error instanceof Error ? error.message : "Replay failed.");
     } finally {

@@ -1075,6 +1075,87 @@ dd {
     color: #9a3412;
 }
 
+.subagent-prompt-banner {
+    background: #fef3c7; /* Light warm amber */
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 16px 16px;
+    display: flex;
+    gap: 10px;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.08);
+    animation: fadeInSlide 0.25s ease-out;
+}
+
+.subagent-prompt-banner.hidden {
+    display: none !important;
+}
+
+.subagent-prompt-icon {
+    color: #d97706;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.subagent-prompt-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-grow: 1;
+}
+
+.subagent-prompt-text {
+    color: #92400e;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0;
+}
+
+.subagent-prompt-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.subagent-prompt-actions button {
+    font-size: 0.72rem;
+    padding: 6px 12px;
+    height: auto;
+}
+
+.subagent-prompt-dismiss {
+    background: none;
+    border: none;
+    color: #b45309;
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+}
+
+.subagent-prompt-dismiss:hover {
+    background: rgba(180, 83, 9, 0.08);
+}
+
+@keyframes fadeInSlide {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+
 /* ═══════════════════════════════════════════════════════════ */
 /* Demo Logs Library                                           */
 /* ═══════════════════════════════════════════════════════════ */
