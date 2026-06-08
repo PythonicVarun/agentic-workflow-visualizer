@@ -1247,8 +1247,62 @@ dd {
 }
 
 .demo-logs-section.collapsed .demo-logs-list,
-.demo-logs-section.collapsed .demo-logs-empty {
-    display: none;
+.demo-logs-section.collapsed .demo-logs-empty,
+.demo-logs-section.collapsed .session-search-container {
+    display: none !important;
+}
+
+.session-search-container {
+    position: relative;
+    padding: 8px 0 0;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.session-search-input {
+    width: 100%;
+    height: 36px;
+    padding: 0 32px 0 12px;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.session-search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.session-search-clear {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    outline: none;
+    border-radius: 50%;
+    transition: color 0.18s ease;
+}
+
+.session-search-clear:hover {
+    color: var(--ink);
+}
+
+.session-search-container.hidden {
+    display: none !important;
 }
 
 .demo-logs-empty {

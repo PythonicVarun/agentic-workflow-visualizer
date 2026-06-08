@@ -48,6 +48,7 @@ const sessionLibrary = {
     importedParsedFiles: [],
     appendFolderUpload: false,
     initialSessionId: null,
+    searchQuery: "",
 };
 
 const els = {
@@ -69,6 +70,9 @@ const els = {
     pickLogFiles: document.querySelector("#pick-log-files"),
     pickLogFolder: document.querySelector("#pick-log-folder"),
     replayDropnote: document.querySelector("#replay-dropnote"),
+    sessionSearchContainer: document.querySelector("#session-search-container"),
+    sessionSearchInput: document.querySelector("#session-search-input"),
+    sessionSearchClear: document.querySelector("#session-search-clear"),
     subagentPromptBanner: document.querySelector("#subagent-prompt-banner"),
     subagentPromptText: document.querySelector("#subagent-prompt-text"),
     subagentUploadFiles: document.querySelector("#subagent-upload-files"),
@@ -2048,6 +2052,66 @@ function rebuildSessionLibrary(descriptors) {
     });
 }
 
+function extractSessionIdFromEntries(entries) {
+    if (!Array.isArray(entries)) return null;
+    for (const entry of entries) {
+        if (!entry) continue;
+        const sid = entry.payload?.session_id ||
+                    entry.event?.data?.session_id ||
+                    entry.data?.session_id ||
+                    entry.session_id;
+        if (sid) return String(sid);
+    }
+    return null;
+}
+
+function extractModelFromEntries(entries) {
+    if (!Array.isArray(entries)) return null;
+    for (const entry of entries) {
+        if (!entry) continue;
+        const model = entry.payload?.model ||
+                      entry.event?.data?.model ||
+                      entry.data?.model ||
+                      entry.model;
+        if (model) return String(model);
+    }
+    return null;
+}
+
+function extractChatTitleFromEntries(entries, fallbackName) {
+    if (!Array.isArray(entries)) return fallbackName;
+    for (const entry of entries) {
+        if (!entry) continue;
+        const prompt = entry.event?.data?.prompt ||
+                       entry.payload?.prompt ||
+                       entry.data?.prompt ||
+                       entry.prompt;
+        if (prompt && (entry.event_type === "user_input" || entry.event?.event_type === "user_input" || entry.hook_name === "UserPromptSubmit")) {
+            return trim(String(prompt).trim(), 58);
+        }
+        if (entry.type === "event_msg" && entry.payload?.type === "user_message") {
+            const codexPrompt = normalizeCodexPrompt(entry.payload.message);
+            if (codexPrompt) return trim(codexPrompt, 58);
+        }
+    }
+    return fallbackName;
+}
+
+function countUniqueAgentsInEntries(entries) {
+    if (!Array.isArray(entries)) return 0;
+    const agents = new Set();
+    for (const entry of entries) {
+        if (!entry) continue;
+        const agentId = entry.agent_id ||
+                        entry.payload?.agent_id ||
+                        entry.event?.agent_id ||
+                        entry.event?.data?.agent_id ||
+                        entry.data?.agent_id;
+        if (agentId) agents.add(String(agentId));
+    }
+    return agents.size;
+}
+
 function rebuildFileLibrary(parsedFiles) {
     sessionLibrary.loaded = true;
     sessionLibrary.mode = "files";
@@ -2067,6 +2131,10 @@ function rebuildFileLibrary(parsedFiles) {
                 : file.lastModified
                   ? new Date(file.lastModified).toISOString()
                   : isoNow();
+            const sessionId = extractSessionIdFromEntries(entries);
+            const model = extractModelFromEntries(entries);
+            const title = extractChatTitleFromEntries(entries, file.name);
+            const agents = countUniqueAgentsInEntries(entries);
             return {
                 id: `file-${index}-${file.name}`,
                 file,
@@ -2076,7 +2144,10 @@ function rebuildFileLibrary(parsedFiles) {
                 filePath: fileDisplayPath(file),
                 updatedAt,
                 eventCount: events.length,
-                title: file.name,
+                title,
+                model,
+                sessionId,
+                agents,
             };
         })
         .sort(
@@ -2163,29 +2234,57 @@ function renderSessionLibrary() {
     const empty = els.sessionLibraryEmpty;
     const count = els.sessionLibraryCount;
     const isCodexMode = sessionLibrary.mode === "codex";
-    const sessions = isCodexMode ? primarySessions() : [];
-    const files = isCodexMode ? [] : sessionLibrary.files;
+
+    if (!sessionLibrary.loaded) {
+        list.innerHTML = "";
+        list.style.display = "none";
+        empty.style.display = "";
+        empty.textContent = "Load one or more log files to inspect them here.";
+        els.sessionSearchContainer?.classList.add("hidden");
+        return;
+    } else {
+        els.sessionSearchContainer?.classList.remove("hidden");
+    }
+
+    const query = sessionLibrary.searchQuery || "";
+    let sessions = isCodexMode ? primarySessions() : [];
+    let files = isCodexMode ? [] : sessionLibrary.files;
+
+    if (query) {
+        if (isCodexMode) {
+            sessions = sessions.filter((session) => {
+                const titleMatch = String(session.title || "").toLowerCase().includes(query);
+                const modelMatch = String(session.meta?.model || "").toLowerCase().includes(query);
+                const idMatch = String(session.id || "").toLowerCase().includes(query);
+                const roleMatch = String(session.role || "").toLowerCase().includes(query);
+                const nicknameMatch = String(session.nickname || "").toLowerCase().includes(query);
+                const cwdMatch = String(session.cwd || "").toLowerCase().includes(query);
+                return titleMatch || modelMatch || idMatch || roleMatch || nicknameMatch || cwdMatch;
+            });
+        } else {
+            files = files.filter((file) => {
+                const titleMatch = String(file.title || "").toLowerCase().includes(query);
+                const pathMatch = String(file.filePath || "").toLowerCase().includes(query);
+                const idMatch = String(file.id || "").toLowerCase().includes(query) ||
+                                String(file.sessionId || "").toLowerCase().includes(query);
+                const modelMatch = String(file.model || "").toLowerCase().includes(query);
+                return titleMatch || pathMatch || idMatch || modelMatch;
+            });
+        }
+    }
 
     els.sessionLibraryTitle.textContent = isCodexMode
         ? "Codex Sessions"
         : (sessionLibrary.importedParsedFiles.length > 0 ? "Log Files" : "Demo Logs");
     count.textContent = String(isCodexMode ? sessions.length : files.length);
 
-    if (!sessionLibrary.loaded) {
-        list.innerHTML = "";
-        list.style.display = "none";
-        empty.style.display = "";
-        empty.textContent =
-            "Load one or more log files to inspect them here.";
-        return;
-    }
-
     if (isCodexMode && !sessions.length) {
         list.innerHTML = "";
         list.style.display = "none";
         empty.style.display = "";
-        empty.textContent =
-            "No primary Codex sessions were found in the selected files.";
+        empty.textContent = query
+            ? `No sessions matching "${query}" were found.`
+            : "No primary Codex sessions were found in the selected files.";
         return;
     }
 
@@ -2193,7 +2292,9 @@ function renderSessionLibrary() {
         list.innerHTML = "";
         list.style.display = "none";
         empty.style.display = "";
-        empty.textContent = "No replayable log files were found.";
+        empty.textContent = query
+            ? `No files matching "${query}" were found.`
+            : "No replayable log files were found.";
         return;
     }
 
@@ -2262,6 +2363,14 @@ function renderSessionLibrary() {
                 meta.appendChild(agentPill);
             }
 
+            if (entry.sessionId) {
+                const idPill = document.createElement("span");
+                idPill.className = "demo-log-pill";
+                idPill.textContent = `ID: ${entry.sessionId.substring(0, 8)}`;
+                idPill.title = entry.sessionId;
+                meta.appendChild(idPill);
+            }
+
             const typePill = document.createElement("span");
             typePill.className = "demo-log-pill model-pill";
             typePill.textContent = entry.model || "log file";
@@ -2321,6 +2430,21 @@ function renderSessionLibrary() {
         childPill.className = "demo-log-pill";
         childPill.textContent = `${spawnedCount} sub-agent${spawnedCount === 1 ? "" : "s"}`;
         meta.appendChild(childPill);
+
+        if (session.id) {
+            const idPill = document.createElement("span");
+            idPill.className = "demo-log-pill";
+            idPill.textContent = `ID: ${session.id.substring(0, 8)}`;
+            idPill.title = session.id;
+            meta.appendChild(idPill);
+        }
+
+        if (session.meta?.model) {
+            const modelPill = document.createElement("span");
+            modelPill.className = "demo-log-pill model-pill";
+            modelPill.textContent = session.meta.model;
+            meta.appendChild(modelPill);
+        }
 
         const source = document.createElement("span");
         source.className = "demo-log-pill model-pill";
@@ -2659,7 +2783,7 @@ async function handleReplaySelection(fileList, source = "files", append = false)
             const fileStr = missingSubagents.map((s) => getSubagentExpectedFilename(mainFilename, s.id)).join(", ");
 
             if (els.subagentPromptText) {
-                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
+                els.subagentPromptText.innerHTML = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
             }
             els.subagentPromptBanner?.classList.remove("hidden");
 
@@ -2779,7 +2903,7 @@ async function handleDirectorySelection(fileList) {
             const fileStr = missingSubagents.map((s) => getSubagentExpectedFilename(mainFilename, s.id)).join(", ");
 
             if (els.subagentPromptText) {
-                els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
+                els.subagentPromptText.innerHTML = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
             }
             els.subagentPromptBanner?.classList.remove("hidden");
             openSubagentWarningModal(`This log file spawned subagent(s) (${labelStr}) whose execution details are missing.\n\nPlease upload the subagent log file(s) (expected: ${fileStr}).`);
@@ -2995,7 +3119,7 @@ function closeConfigModal() {
 
 function openSubagentWarningModal(message) {
     if (els.subagentWarningModalText) {
-        els.subagentWarningModalText.textContent = message;
+        els.subagentWarningModalText.innerHTML = message;
     }
     els.subagentWarningModal?.classList.remove("hidden");
     els.subagentWarningModal?.setAttribute("aria-hidden", "false");
@@ -4267,7 +4391,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 function getSubagentExpectedFilename(mainFilename, spawnedAgentId) {
-    return `*${spawnedAgentId}.jsonl`;
+    return `<code class="inline-code">*${spawnedAgentId}.jsonl</code>`;
 }
 
 async function replayLogContent(content, filename, showPopup = false) {
@@ -4338,7 +4462,7 @@ async function replayLogContent(content, filename, showPopup = false) {
 
         // Show banner in the UI
         if (els.subagentPromptText) {
-            els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
+            els.subagentPromptText.innerHTML = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
         }
         els.subagentPromptBanner?.classList.remove("hidden");
 
@@ -4744,6 +4868,25 @@ els.sessionLibraryToggle.addEventListener("click", () => {
     const section = els.sessionLibrarySection;
     const isCollapsed = section.classList.toggle("collapsed");
     els.sessionLibraryToggle.setAttribute("aria-expanded", String(!isCollapsed));
+});
+
+els.sessionSearchInput?.addEventListener("input", (event) => {
+    sessionLibrary.searchQuery = event.target.value.toLowerCase().trim();
+    if (sessionLibrary.searchQuery) {
+        els.sessionSearchClear?.classList.remove("hidden");
+    } else {
+        els.sessionSearchClear?.classList.add("hidden");
+    }
+    renderSessionLibrary();
+});
+
+els.sessionSearchClear?.addEventListener("click", () => {
+    if (els.sessionSearchInput) {
+        els.sessionSearchInput.value = "";
+    }
+    sessionLibrary.searchQuery = "";
+    els.sessionSearchClear?.classList.add("hidden");
+    renderSessionLibrary();
 });
 
 renderSessionLibrary();

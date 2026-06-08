@@ -103,8 +103,10 @@
                                 class="replay-dropzone"
                                 for="replay-file"
                             >
-                                Drop Codex `.jsonl` logs here or click to
-                                choose them.
+                                <div>
+                                    Drop Codex <code class="inline-code">.jsonl</code> logs here or click to
+                                    choose them.
+                                </div>
                             </label>
                             <div class="replay-load-actions">
                                 <button
@@ -213,6 +215,17 @@
                                         <polyline points="3,4.5 6,7.5 9,4.5" />
                                     </svg>
                                 </button>
+                                <div class="session-search-container hidden" id="session-search-container">
+                                    <input
+                                        id="session-search-input"
+                                        class="session-search-input"
+                                        type="text"
+                                        placeholder="Search sessions (title, model, ID...)"
+                                    />
+                                    <button id="session-search-clear" class="session-search-clear hidden" type="button" aria-label="Clear search">
+                                        &times;
+                                    </button>
+                                </div>
                                 <ol
                                     class="demo-logs-list session-library-list"
                                     id="session-library-list"
