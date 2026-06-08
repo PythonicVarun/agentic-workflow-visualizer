@@ -358,18 +358,23 @@
                                 </div>
                                 <div class="replay-speed-control">
                                     <span class="speed-label">Speed</span>
+                                    <div class="speed-info-tooltip">
+                                        <button class="tooltip-trigger" type="button" aria-label="Speed info">?</button>
+                                        <div class="tooltip-box">
+                                            <h3>Speed Modes</h3>
+                                            <p><strong>Realtime mode:</strong> Replays at 10x the original speed.</p>
+                                            <p><strong>Slow mode:</strong> Runs 1 tool call every 1/2 second.</p>
+                                            <p><strong>Fast mode:</strong> Runs 4 tool calls per 1/2 second.</p>
+                                        </div>
+                                    </div>
                                     <select
                                         id="replay-speed"
                                         class="replay-speed-select"
                                         aria-label="Replay speed"
                                     >
-                                        <option value="0.25">0.25×</option>
-                                        <option value="0.5">0.5×</option>
-                                        <option value="1" selected>1×</option>
-                                        <option value="2">2×</option>
-                                        <option value="4">4×</option>
-                                        <option value="8">8×</option>
-                                        <option value="10">10×</option>
+                                        <option value="realtime" selected>Realtime mode</option>
+                                        <option value="slow">Slow mode</option>
+                                        <option value="fast">Fast mode</option>
                                     </select>
                                 </div>
                                 <span

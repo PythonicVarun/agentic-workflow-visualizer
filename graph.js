@@ -4115,7 +4115,7 @@ const replay = {
     allEvents: [], // all parsed events sorted by timestamp
     currentIndex: 0, // how many events have been "played" so far
     playing: false,
-    speed: 1,
+    speed: "realtime",
     filename: null,
     logDetails: {},
     // timing
@@ -4125,6 +4125,7 @@ const replay = {
     simTimeMs: 0, // current simulation time offset from first event
     wallAnchor: 0, // performance.now() when we last started/resumed
     simAnchorMs: 0, // simTimeMs at the moment we started/resumed
+    toolCallsAnchor: 0, // tool call count when we last started/resumed
     rafId: null,
     active: false, // true when a log is loaded for replay
 };
@@ -4204,22 +4205,72 @@ function replayAdvanceTo(targetSimMs) {
     }
 }
 
+function countToolCalls(endIndex) {
+    const hasToolCalls = replay.allEvents.some(evt => evt.event_type === "tool_call");
+    let count = 0;
+    for (let i = 0; i < endIndex; i++) {
+        const isIncrement = hasToolCalls
+            ? (replay.allEvents[i] && replay.allEvents[i].event_type === "tool_call")
+            : true;
+        if (isIncrement) {
+            count++;
+        }
+    }
+    return count;
+}
+
+function getIndexForToolCalls(targetToolCalls) {
+    const hasToolCalls = replay.allEvents.some(evt => evt.event_type === "tool_call");
+    let count = 0;
+    for (let i = 0; i < replay.allEvents.length; i++) {
+        const isIncrement = hasToolCalls
+            ? (replay.allEvents[i] && replay.allEvents[i].event_type === "tool_call")
+            : true;
+        if (isIncrement) {
+            count++;
+        }
+        if (count > targetToolCalls) {
+            return i;
+        }
+    }
+    return replay.allEvents.length;
+}
+
 function replayTick() {
     if (!replay.playing) return;
     const now = performance.now();
     const wallElapsed = now - replay.wallAnchor;
-    const simElapsed = wallElapsed * replay.speed;
-    const targetSimMs = replay.simAnchorMs + simElapsed;
 
     const prevIndex = replay.currentIndex;
-    replayAdvanceTo(targetSimMs);
+
+    if (replay.speed === "slow" || replay.speed === "fast") {
+        const rate = replay.speed === "slow" ? (1 / 500) : (4 / 500);
+        const targetToolCalls = replay.toolCallsAnchor + Math.floor(wallElapsed * rate);
+        replay.currentIndex = getIndexForToolCalls(targetToolCalls);
+        
+        // Update simTimeMs to match current index
+        if (replay.currentIndex === 0) {
+            replay.simTimeMs = 0;
+        } else if (replay.currentIndex >= replay.allEvents.length) {
+            replay.simTimeMs = replay.totalDuration;
+        } else {
+            const evt = replay.allEvents[replay.currentIndex - 1];
+            replay.simTimeMs = parseDate(evt.timestamp).getTime() - replay.firstTimestamp;
+        }
+    } else {
+        // Realtime mode (10x speed)
+        const speedVal = 10;
+        const simElapsed = wallElapsed * speedVal;
+        const targetSimMs = replay.simAnchorMs + simElapsed;
+        replayAdvanceTo(targetSimMs);
+    }
 
     if (replay.currentIndex !== prevIndex) {
         replayBuildAndRender();
     }
     replayUpdateUI();
 
-    if (replay.simTimeMs >= replay.totalDuration) {
+    if (replay.currentIndex >= replay.allEvents.length || replay.simTimeMs >= replay.totalDuration) {
         // Reached the end
         replay.playing = false;
         replay.simTimeMs = replay.totalDuration;
@@ -4240,6 +4291,7 @@ function replayStart() {
     replay.playing = true;
     replay.wallAnchor = performance.now();
     replay.simAnchorMs = replay.simTimeMs;
+    replay.toolCallsAnchor = countToolCalls(replay.currentIndex);
     replay.rafId = requestAnimationFrame(replayTick);
     replayUpdateUI();
 }
@@ -4350,8 +4402,8 @@ function replayLoadEvents(events, filename, logDetails = {}) {
     els.replayPlayer.classList.add("active");
     els.replayScrubber.max = String(sorted.length);
     els.replayScrubber.value = "0";
-    els.replaySpeed.value = "1";
-    replay.speed = 1;
+    els.replaySpeed.value = "realtime";
+    replay.speed = "realtime";
 
     // Show empty graph initially
     state.graph = createEmptyGraph(replay.logDetails);
@@ -4369,7 +4421,7 @@ els.replayPlay.addEventListener("click", replayToggle);
 els.replayRewind.addEventListener("click", replayRewind);
 els.replayStep.addEventListener("click", replayStepForward);
 els.replaySpeed.addEventListener("change", (e) => {
-    replaySetSpeed(parseFloat(e.target.value) || 1);
+    replaySetSpeed(e.target.value);
 });
 els.replayScrubber.addEventListener("input", (e) => {
     const idx = parseInt(e.target.value, 10);
