@@ -29,6 +29,7 @@ const state = {
     summaryProcessing: false,
     llmStatus: "",
     expandedToolRuns: new Set(),
+    collapsedSubagents: new Set(),
     toolDescriptions: loadToolDescriptions(),
     toolQueue: [],
     toolProcessing: false,
@@ -1160,10 +1161,9 @@ function getToolDescription(run) {
     if (entry?.status === "ready") {
         return entry.description;
     }
-    if (state.toolInflight.has(run.id)) {
-        return "Generating action description...";
-    }
-    return "";
+    const toolName = run.tool_name || "tool";
+    const inputSummary = summarize(run.input, 90);
+    return inputSummary ? `${toolName} | ${inputSummary}` : toolName;
 }
 
 function createEmptyGraph(log = {}) {
@@ -1202,6 +1202,7 @@ function snapshotNode(node, now) {
         spawn_prompt: node.spawn_prompt,
         event_count: node.event_count,
         tool_count: node.tool_count,
+        spawn_sequence: node.spawn_sequence || null,
         tool_runs: (node.tool_runs || []).map((run) => ({
             ...run,
             input: normalizeToolValue(run.input),
@@ -1456,6 +1457,7 @@ function buildGraphFromEvents(events, logDetails = {}) {
                         timestamp: event.timestamp,
                     });
                     child.parent_id = parentId;
+                    child.spawn_sequence = sequence;
                     child.nickname = data.spawned_agent_label || child.nickname;
                     child.spawn_prompt =
                         data.spawn_prompt || child.spawn_prompt;
@@ -1489,6 +1491,9 @@ function buildGraphFromEvents(events, logDetails = {}) {
                     label,
                 });
                 node.parent_id = parentId;
+                if (!node.spawn_sequence) {
+                    node.spawn_sequence = sequence;
+                }
                 node.nickname = data.name || node.nickname;
                 if (data.prompt) node.spawn_prompt = data.prompt;
                 node.started_at = new Date(
@@ -1777,7 +1782,7 @@ function extractEventsFromEntries(entries) {
     if (hasTranscriptEntries) {
         const trEvents = [];
         const baseTime = entries[0]?.timestamp ? new Date(entries[0].timestamp).getTime() : Date.now();
-        
+
         trEvents.push({
             event_type: "session_start",
             agent_id: ROOT_AGENT_ID,
@@ -1791,10 +1796,10 @@ function extractEventsFromEntries(entries) {
 
         entries.forEach((entry, idx) => {
             if (!entry) return;
-            const timestamp = entry.timestamp 
-                ? new Date(entry.timestamp).toISOString() 
+            const timestamp = entry.timestamp
+                ? new Date(entry.timestamp).toISOString()
                 : new Date(baseTime + idx * 1000).toISOString();
-            
+
             if (entry.type === "USER_INPUT") {
                 trEvents.push({
                     event_type: "user_input",
@@ -2760,7 +2765,8 @@ function createToolHistoryCard(run) {
     // title.textContent = run.tool_name || "tool";
 
     const descText = getToolDescription(run);
-    if (!descText && hasLLMConfig()) {
+    const entry = state.toolDescriptions[run.id];
+    if ((!entry || entry.status !== "ready") && hasLLMConfig()) {
         enqueueToolDescription(run);
     }
 
@@ -2932,6 +2938,261 @@ function openAgentModal(node) {
     els.agentModal.setAttribute("aria-hidden", "false");
 }
 
+function createSubagentItem(node) {
+    const presentation = getNodePresentation(node);
+    const status = normalizeStatus(node.status);
+    const isExpanded = !state.collapsedSubagents.has(node.id);
+    const isSelected = node.id === state.selectedId;
+
+    const item = document.createElement("div");
+    item.className = `subagent-item ${status}${isExpanded ? " expanded" : ""}${isSelected ? " selected" : ""}`;
+    item.id = `card-${node.id}`;
+
+    // Prevent scrolling parent card when using wheel/pointer
+    item.addEventListener("wheel", (e) => e.stopPropagation());
+    item.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "subagent-header";
+
+    const dot = document.createElement("span");
+    dot.className = "subagent-dot";
+
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "subagent-title-wrap";
+
+    const title = document.createElement("span");
+    title.className = "subagent-title";
+    title.textContent = presentation.name;
+
+    const subtitle = document.createElement("span");
+    subtitle.className = "subagent-subtitle";
+    const subtitleParts = [node.role || "subagent"];
+    if (node.model) subtitleParts.push(node.model);
+    subtitleParts.push(formatElapsed(node.elapsed_seconds));
+    subtitle.textContent = subtitleParts.join(" | ");
+
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(subtitle);
+
+    const actions = document.createElement("div");
+    actions.className = "subagent-actions";
+
+    const selectBtn = document.createElement("button");
+    selectBtn.className = "subagent-select-btn";
+    selectBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px;">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>Details
+    `;
+    selectBtn.title = "View sub-agent details";
+    selectBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        state.selectedId = node.id;
+        openAgentModal(node);
+        render();
+    });
+    actions.appendChild(selectBtn);
+
+    const caret = document.createElement("span");
+    caret.className = "subagent-caret";
+    caret.textContent = isExpanded ? "▼" : "▶";
+
+    header.appendChild(dot);
+    header.appendChild(titleWrap);
+    header.appendChild(actions);
+    header.appendChild(caret);
+    item.appendChild(header);
+
+    // Toggle expand/collapse
+    header.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (state.collapsedSubagents.has(node.id)) {
+            state.collapsedSubagents.delete(node.id);
+        } else {
+            state.collapsedSubagents.add(node.id);
+        }
+        render();
+    });
+
+    if (isExpanded) {
+        const body = document.createElement("div");
+        body.className = "subagent-body";
+
+        // Agent Summary
+        const summarySec = document.createElement("div");
+        summarySec.className = "subagent-section";
+        const summaryLabel = document.createElement("div");
+        summaryLabel.className = "subagent-section-label";
+        summaryLabel.textContent = "Agent Summary";
+        const summaryVal = document.createElement("div");
+        summaryVal.className = "subagent-desc";
+        summaryVal.textContent = presentation.description;
+        if (presentation.status !== "ready") {
+            summaryVal.style.color = "var(--muted)";
+            summaryVal.style.fontStyle = "italic";
+        }
+        summarySec.appendChild(summaryLabel);
+        summarySec.appendChild(summaryVal);
+        body.appendChild(summarySec);
+
+        // Spawn prompt if any
+        if (node.spawn_prompt) {
+            const promptSec = document.createElement("div");
+            promptSec.className = "subagent-section";
+            const label = document.createElement("div");
+            label.className = "subagent-section-label";
+            label.textContent = "Spawn Prompt";
+            const val = document.createElement("pre");
+            val.className = "subagent-val prompt-val";
+            val.textContent = node.spawn_prompt;
+            promptSec.appendChild(label);
+            promptSec.appendChild(val);
+            body.appendChild(promptSec);
+        }
+
+        // Current Action / Last Action
+        if (node.last_action && node.last_action !== "Waiting") {
+            const actionSec = document.createElement("div");
+            actionSec.className = "subagent-section";
+            const actionLabel = document.createElement("div");
+            actionLabel.className = "subagent-section-label";
+            actionLabel.textContent = "Last Action";
+            const actionVal = document.createElement("div");
+            actionVal.className = "subagent-desc";
+            actionVal.textContent = node.last_action;
+            actionSec.appendChild(actionLabel);
+            actionSec.appendChild(actionVal);
+            body.appendChild(actionSec);
+        }
+
+        // Subagent's own tool runs and nested subagents interleaved!
+        const childRuns = getNodeToolRuns(node);
+        const subagents = (state.graph.nodes || []).filter(n => n.parent_id === node.id);
+        const subActivities = [];
+        childRuns.forEach((run) => {
+            subActivities.push({ type: "tool", sequence: run.sequence, data: run });
+        });
+        subagents.forEach((childSub) => {
+            subActivities.push({ type: "subagent", sequence: childSub.spawn_sequence || 0, data: childSub });
+        });
+        subActivities.sort((a, b) => b.sequence - a.sequence);
+
+        if (subActivities.length > 0) {
+            const activitySec = document.createElement("div");
+            activitySec.className = "subagent-section";
+            const label = document.createElement("div");
+            label.className = "subagent-section-label";
+            label.textContent = `Activity (${subActivities.length})`;
+            activitySec.appendChild(label);
+
+            subActivities.forEach((subItem) => {
+                if (subItem.type === "tool") {
+                    const run = subItem.data;
+                    const isRunExpanded = state.expandedToolRuns.has(run.id);
+                    const descText = getToolDescription(run);
+
+                    const runDiv = document.createElement("div");
+                    runDiv.className = `tool-run-item ${toolRunStatus(run)}${isRunExpanded ? " expanded" : ""}`;
+                    runDiv.dataset.runId = run.id;
+
+                    runDiv.addEventListener("wheel", (e) => e.stopPropagation());
+                    runDiv.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+                    const runHeader = document.createElement("div");
+                    runHeader.className = "tool-run-header";
+
+                    const runDot = document.createElement("span");
+                    runDot.className = "tool-run-dot";
+
+                    const runTitleWrap = document.createElement("div");
+                    runTitleWrap.className = "tool-run-title-wrap";
+
+                    const desc = document.createElement("span");
+                    desc.className = "tool-run-desc";
+                    desc.textContent = descText;
+                    runDiv.title = descText;
+                    runTitleWrap.appendChild(desc);
+
+                    const entry = state.toolDescriptions[run.id];
+                    if (!entry || entry.status !== "ready") {
+                        enqueueToolDescription(run);
+                    }
+
+                    const runCaret = document.createElement("span");
+                    runCaret.className = "tool-run-caret";
+                    runCaret.textContent = isRunExpanded ? "▼" : "▶";
+
+                    runHeader.appendChild(runDot);
+                    runHeader.appendChild(runTitleWrap);
+                    runHeader.appendChild(runCaret);
+                    runDiv.appendChild(runHeader);
+
+                    runHeader.addEventListener("click", (e) => {
+                        e.stopPropagation();
+                        toggleToolRun(run.id);
+                    });
+
+                    if (isRunExpanded) {
+                        const runBody = document.createElement("div");
+                        runBody.className = "tool-run-body";
+
+                        const infoBar = document.createElement("div");
+                        infoBar.className = "tool-run-info-bar";
+                        infoBar.style.fontSize = "9px";
+                        infoBar.style.fontWeight = "750";
+                        infoBar.style.color = "#94a3b8";
+                        infoBar.style.borderBottom = "1px solid #334155";
+                        infoBar.style.paddingBottom = "6px";
+                        infoBar.style.marginBottom = "4px";
+                        infoBar.textContent = `Tool: ${run.tool_name || "tool"} | Call: ${run.id || "n/a"}`;
+                        runBody.appendChild(infoBar);
+
+                        const inputSection = document.createElement("div");
+                        inputSection.className = "tool-run-section";
+                        const inputLabel = document.createElement("div");
+                        inputLabel.className = "tool-run-section-label";
+                        inputLabel.textContent = "Input";
+                        const inputVal = document.createElement("pre");
+                        inputVal.className = "tool-run-val";
+                        inputVal.textContent = formatToolValue(run.input);
+                        inputSection.appendChild(inputLabel);
+                        inputSection.appendChild(inputVal);
+
+                        const outputSection = document.createElement("div");
+                        outputSection.className = "tool-run-section";
+                        const outputLabel = document.createElement("div");
+                        outputLabel.className = "tool-run-section-label";
+                        outputLabel.textContent = "Output";
+                        const outputVal = document.createElement("pre");
+                        outputVal.className = "tool-run-val";
+                        outputVal.textContent = formatToolValue(run.output);
+                        outputSection.appendChild(outputLabel);
+                        outputSection.appendChild(outputVal);
+
+                        runBody.appendChild(inputSection);
+                        runBody.appendChild(outputSection);
+                        runDiv.appendChild(runBody);
+                    }
+
+                    activitySec.appendChild(runDiv);
+                } else if (subItem.type === "subagent") {
+                    const childSub = subItem.data;
+                    activitySec.appendChild(createSubagentItem(childSub));
+                }
+            });
+            body.appendChild(activitySec);
+        }
+
+        item.appendChild(body);
+    }
+
+    return item;
+}
+
 function drawNode(node) {
     const presentation = getNodePresentation(node);
     const status = normalizeStatus(node.status);
@@ -2947,7 +3208,7 @@ function drawNode(node) {
     // Click to select and open modal
     card.addEventListener("click", (e) => {
         // If clicking a link or interactive element inside the card, don't open the modal
-        if (e.target.closest("a") || e.target.closest(".tool-run-item")) return;
+        if (e.target.closest("a") || e.target.closest(".tool-run-item") || e.target.closest(".subagent-item")) return;
 
         e.stopPropagation();
         state.selectedId = node.id;
@@ -3093,116 +3354,124 @@ function drawNode(node) {
         card.appendChild(actionDiv);
     }
 
-    // 6. Tool Activity List
+    // 6. Activity List (Tool Runs & Nested Sub-agents)
     const runs = getNodeToolRuns(node);
-    if (runs.length > 0) {
-        const toolsContainer = document.createElement("div");
-        toolsContainer.className = "card-tools-html";
+    const subAgentChildNodes = (state.graph.nodes || []).filter(n => n.parent_id === node.id);
+    const activities = [];
+    runs.forEach((run) => {
+        activities.push({ type: "tool", sequence: run.sequence, data: run });
+    });
+    subAgentChildNodes.forEach((child) => {
+        activities.push({ type: "subagent", sequence: child.spawn_sequence || 0, data: child });
+    });
+    activities.sort((a, b) => b.sequence - a.sequence);
 
-        const toolsTitle = document.createElement("div");
-        toolsTitle.className = "card-tools-title";
-        toolsTitle.textContent = `Tool Activity (${runs.length})`;
-        toolsContainer.appendChild(toolsTitle);
+    if (activities.length > 0) {
+        const activityContainer = document.createElement("div");
+        activityContainer.className = "card-tools-html";
 
-        runs.forEach((run) => {
-            const isExpanded = state.expandedToolRuns.has(run.id);
-            const descText = getToolDescription(run);
+        const activityTitle = document.createElement("div");
+        activityTitle.className = "card-tools-title";
+        activityTitle.textContent = `Activity (${activities.length})`;
+        activityContainer.appendChild(activityTitle);
 
-            const div = document.createElement("div");
-            div.className = `tool-run-item ${toolRunStatus(run)}${isExpanded ? " expanded" : ""}`;
-            div.dataset.runId = run.id;
+        activities.forEach((item) => {
+            if (item.type === "tool") {
+                const run = item.data;
+                const isExpanded = state.expandedToolRuns.has(run.id);
+                const descText = getToolDescription(run);
 
-            div.addEventListener("wheel", (e) => {
-                e.stopPropagation();
-            });
-            div.addEventListener("pointerdown", (e) => {
-                e.stopPropagation();
-            });
+                const div = document.createElement("div");
+                div.className = `tool-run-item ${toolRunStatus(run)}${isExpanded ? " expanded" : ""}`;
+                div.dataset.runId = run.id;
 
-            const runHeader = document.createElement("div");
-            runHeader.className = "tool-run-header";
+                div.addEventListener("wheel", (e) => e.stopPropagation());
+                div.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-            const runDot = document.createElement("span");
-            runDot.className = "tool-run-dot";
+                const runHeader = document.createElement("div");
+                runHeader.className = "tool-run-header";
 
-            const titleWrap = document.createElement("div");
-            titleWrap.className = "tool-run-title-wrap";
+                const runDot = document.createElement("span");
+                runDot.className = "tool-run-dot";
 
-            // const runTitle = document.createElement("span");
-            // runTitle.className = "tool-run-title";
-            // runTitle.textContent = run.tool_name || "tool";
-            // titleWrap.appendChild(runTitle);
+                const titleWrap = document.createElement("div");
+                titleWrap.className = "tool-run-title-wrap";
 
-            if (descText) {
                 const desc = document.createElement("span");
                 desc.className = "tool-run-desc";
                 desc.textContent = descText;
                 div.title = descText;
                 titleWrap.appendChild(desc);
-            } else {
-                enqueueToolDescription(run);
+
+                const entry = state.toolDescriptions[run.id];
+                if (!entry || entry.status !== "ready") {
+                    enqueueToolDescription(run);
+                }
+
+                const caret = document.createElement("span");
+                caret.className = "tool-run-caret";
+                caret.textContent = isExpanded ? "▼" : "▶";
+
+                runHeader.appendChild(runDot);
+                runHeader.appendChild(titleWrap);
+                runHeader.appendChild(caret);
+                div.appendChild(runHeader);
+
+                runHeader.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    toggleToolRun(run.id);
+                });
+
+                if (isExpanded) {
+                    const body = document.createElement("div");
+                    body.className = "tool-run-body";
+
+                    const infoBar = document.createElement("div");
+                    infoBar.className = "tool-run-info-bar";
+                    infoBar.style.fontSize = "9px";
+                    infoBar.style.fontWeight = "750";
+                    infoBar.style.color = "#94a3b8";
+                    infoBar.style.borderBottom = "1px solid #334155";
+                    infoBar.style.paddingBottom = "6px";
+                    infoBar.style.marginBottom = "4px";
+                    infoBar.textContent = `Tool: ${run.tool_name || "tool"} | Call: ${run.id || "n/a"}`;
+                    body.appendChild(infoBar);
+
+                    const inputSection = document.createElement("div");
+                    inputSection.className = "tool-run-section";
+                    const inputLabel = document.createElement("div");
+                    inputLabel.className = "tool-run-section-label";
+                    inputLabel.textContent = "Input";
+                    const inputVal = document.createElement("pre");
+                    inputVal.className = "tool-run-val";
+                    inputVal.textContent = formatToolValue(run.input);
+                    inputSection.appendChild(inputLabel);
+                    inputSection.appendChild(inputVal);
+
+                    const outputSection = document.createElement("div");
+                    outputSection.className = "tool-run-section";
+                    const outputLabel = document.createElement("div");
+                    outputLabel.className = "tool-run-section-label";
+                    outputLabel.textContent = "Output";
+                    const outputVal = document.createElement("pre");
+                    outputVal.className = "tool-run-val";
+                    outputVal.textContent = formatToolValue(run.output);
+                    outputSection.appendChild(outputLabel);
+                    outputSection.appendChild(outputVal);
+
+                    body.appendChild(inputSection);
+                    body.appendChild(outputSection);
+                    div.appendChild(body);
+                }
+
+                activityContainer.appendChild(div);
+            } else if (item.type === "subagent") {
+                const subagentNode = item.data;
+                activityContainer.appendChild(createSubagentItem(subagentNode));
             }
-
-            const caret = document.createElement("span");
-            caret.className = "tool-run-caret";
-            caret.textContent = isExpanded ? "▼" : "▶";
-
-            runHeader.appendChild(runDot);
-            runHeader.appendChild(titleWrap);
-            runHeader.appendChild(caret);
-            div.appendChild(runHeader);
-
-            runHeader.addEventListener("click", (e) => {
-                e.stopPropagation();
-                toggleToolRun(run.id);
-            });
-
-            if (isExpanded) {
-                const body = document.createElement("div");
-                body.className = "tool-run-body";
-
-                const infoBar = document.createElement("div");
-                infoBar.className = "tool-run-info-bar";
-                infoBar.style.fontSize = "9px";
-                infoBar.style.fontWeight = "750";
-                infoBar.style.color = "#94a3b8";
-                infoBar.style.borderBottom = "1px solid #334155";
-                infoBar.style.paddingBottom = "6px";
-                infoBar.style.marginBottom = "4px";
-                infoBar.textContent = `Tool: ${run.tool_name || "tool"} | Call: ${run.id || "n/a"}`;
-                body.appendChild(infoBar);
-
-                const inputSection = document.createElement("div");
-                inputSection.className = "tool-run-section";
-                const inputLabel = document.createElement("div");
-                inputLabel.className = "tool-run-section-label";
-                inputLabel.textContent = "Input";
-                const inputVal = document.createElement("pre");
-                inputVal.className = "tool-run-val";
-                inputVal.textContent = formatToolValue(run.input);
-                inputSection.appendChild(inputLabel);
-                inputSection.appendChild(inputVal);
-
-                const outputSection = document.createElement("div");
-                outputSection.className = "tool-run-section";
-                const outputLabel = document.createElement("div");
-                outputLabel.className = "tool-run-section-label";
-                outputLabel.textContent = "Output";
-                const outputVal = document.createElement("pre");
-                outputVal.className = "tool-run-val";
-                outputVal.textContent = formatToolValue(run.output);
-                outputSection.appendChild(outputLabel);
-                outputSection.appendChild(outputVal);
-
-                body.appendChild(inputSection);
-                body.appendChild(outputSection);
-                div.appendChild(body);
-            }
-
-            toolsContainer.appendChild(div);
         });
 
-        card.appendChild(toolsContainer);
+        card.appendChild(activityContainer);
     }
 
     els.svg.appendChild(card);
@@ -3281,7 +3550,10 @@ function renderGraph() {
         return;
     }
 
-    nodes.forEach((node) => {
+    // A node is a root node if it has no parent, or if its parent is not present in the graph
+    const rootNodes = nodes.filter(node => !node.parent_id || !nodes.some(n => n.id === node.parent_id));
+
+    rootNodes.forEach((node) => {
         drawNode(node);
     });
 
@@ -3934,7 +4206,7 @@ async function replayLogContent(content, filename, showPopup = false) {
     if (missingSubagents.length > 0) {
         const labelStr = missingSubagents.map((s) => s.label).join(", ");
         const fileStr = missingSubagents.map((s) => s.expectedFilename).join(", ");
-        
+
         // Show banner in the UI
         if (els.subagentPromptText) {
             els.subagentPromptText.textContent = `This log file spawned subagent(s) (${labelStr}) whose execution details are missing (expected: ${fileStr}). Please upload the subagent log file(s), or upload the whole sessions folder.`;
