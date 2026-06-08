@@ -2735,6 +2735,28 @@ function replayFileEntry(fileId, showPopup = false) {
         });
 }
 
+function triggerSidebarToggleHighlight() {
+    if (localStorage.getItem("awv-sidebar-toggle-highlight-seen") === "true") {
+        return;
+    }
+    const toggleButton = document.querySelector("#sidebar-toggle-button");
+    if (!toggleButton) return;
+
+    toggleButton.classList.add("pulse-highlight");
+    localStorage.setItem("awv-sidebar-toggle-highlight-seen", "true");
+
+    const clearHighlight = () => {
+        toggleButton.classList.remove("pulse-highlight");
+        toggleButton.removeEventListener("click", clearHighlight);
+    };
+    toggleButton.addEventListener("click", clearHighlight);
+
+    setTimeout(() => {
+        toggleButton.classList.remove("pulse-highlight");
+        toggleButton.removeEventListener("click", clearHighlight);
+    }, 12000);
+}
+
 async function handleReplaySelection(fileList, source = "files", append = false) {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
@@ -2798,6 +2820,7 @@ async function handleReplaySelection(fileList, source = "files", append = false)
         if (firstSession) {
             replayCodexSession(firstSession.id);
         }
+        triggerSidebarToggleHighlight();
         return;
     }
 
@@ -2809,6 +2832,7 @@ async function handleReplaySelection(fileList, source = "files", append = false)
     if (firstFile) {
         await replayFileEntry(firstFile.id, files.length === 1);
     }
+    triggerSidebarToggleHighlight();
 }
 
 async function handleDirectorySelection(fileList) {
@@ -2915,6 +2939,7 @@ async function handleDirectorySelection(fileList) {
         if (firstSession) {
             replayCodexSession(firstSession.id);
         }
+        triggerSidebarToggleHighlight();
         return;
     }
 
@@ -2926,6 +2951,7 @@ async function handleDirectorySelection(fileList) {
     if (firstFile) {
         await replayFileEntry(firstFile.id, parsedFiles.length === 1);
     }
+    triggerSidebarToggleHighlight();
 }
 
 function graphHasDetailedTools(graph) {

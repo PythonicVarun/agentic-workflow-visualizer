@@ -292,6 +292,28 @@ h2 {
     color: var(--ink);
 }
 
+/* Sidebar toggle highlight animation */
+@keyframes togglePulseGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.5);
+        border-color: var(--accent);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(15, 118, 110, 0);
+        border-color: var(--accent);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(15, 118, 110, 0);
+    }
+}
+
+.sidebar-toggle.pulse-highlight {
+    animation: togglePulseGlow 1.8s infinite;
+    color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    border-width: 1.5px !important;
+}
+
 .metric {
     align-items: baseline;
     background: var(--surface-strong);
