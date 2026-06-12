@@ -1627,6 +1627,18 @@ function setReplayDropnote(message = "", tone = "default") {
     els.replayDropnote.classList.toggle("is-warning", tone === "warning");
 }
 
+function combineReplayNotes(...parts) {
+    return parts
+        .map((part) => String(part || "").trim())
+        .filter(Boolean)
+        .join(" ");
+}
+
+function formatManualReplaySelectionNote(label, count) {
+    const noun = count === 1 ? label : `${label}s`;
+    return `Imported ${count} ${noun}. Select one from the sidebar to load it.`;
+}
+
 function summarizeReplayImportIssues(report, source) {
     const parts = [];
     if (report.unreadable.length) {
@@ -2838,6 +2850,9 @@ async function handleReplaySelection(fileList, source = "files", append = false)
 async function handleDirectorySelection(fileList) {
     const allFiles = Array.from(fileList || []).filter(Boolean);
     if (!allFiles.length) return;
+    const appendFolderUpload = sessionLibrary.appendFolderUpload;
+    const previousSessionId = sessionLibrary.selectedSessionId;
+    const previousFileId = sessionLibrary.selectedFileId;
 
     // Filter files: must end with .jsonl
     const targetFiles = allFiles.filter((file) => {
@@ -2896,7 +2911,7 @@ async function handleDirectorySelection(fileList) {
     const importSummary = summarizeReplayImportIssues(report, "folder");
     setReplayDropnote(importSummary, importSummary ? "warning" : "default");
 
-    if (sessionLibrary.appendFolderUpload) {
+    if (appendFolderUpload) {
         const mergedMap = new Map();
         sessionLibrary.importedParsedFiles.forEach((item) => {
             mergedMap.set(item.file.name, item);
@@ -2935,9 +2950,24 @@ async function handleDirectorySelection(fileList) {
             els.subagentPromptBanner?.classList.add("hidden");
         }
 
-        const firstSession = primarySessions()[0];
-        if (firstSession) {
-            replayCodexSession(firstSession.id);
+        if (appendFolderUpload) {
+            const firstSession = primarySessions()[0];
+            const nextSessionId =
+                previousSessionId && sessionLibrary.sessionMap.has(previousSessionId)
+                    ? previousSessionId
+                    : firstSession?.id || null;
+            if (nextSessionId) {
+                replayCodexSession(nextSessionId);
+            }
+        } else {
+            clearReplayWorkspace();
+            setReplayDropnote(
+                combineReplayNotes(
+                    importSummary,
+                    formatManualReplaySelectionNote("session", primarySessions().length),
+                ),
+                importSummary ? "warning" : "default",
+            );
         }
         triggerSidebarToggleHighlight();
         return;
@@ -2947,9 +2977,23 @@ async function handleDirectorySelection(fileList) {
     sessionLibrary.mode = "files";
     rebuildFileLibrary(sessionLibrary.importedParsedFiles);
     renderSessionLibrary();
-    const firstFile = sessionLibrary.files[0];
-    if (firstFile) {
-        await replayFileEntry(firstFile.id, parsedFiles.length === 1);
+    if (appendFolderUpload) {
+        const firstFile = sessionLibrary.files[0];
+        const nextFileId = sessionLibrary.files.some((file) => file.id === previousFileId)
+            ? previousFileId
+            : firstFile?.id || null;
+        if (nextFileId) {
+            await replayFileEntry(nextFileId, parsedFiles.length === 1);
+        }
+    } else {
+        clearReplayWorkspace();
+        setReplayDropnote(
+            combineReplayNotes(
+                importSummary,
+                formatManualReplaySelectionNote("log file", sessionLibrary.files.length),
+            ),
+            importSummary ? "warning" : "default",
+        );
     }
     triggerSidebarToggleHighlight();
 }
@@ -4068,19 +4112,23 @@ function loadState() {
     queueCompletedAgentSummaries();
 }
 
+function clearReplayWorkspace() {
+    replayStop();
+    state.graph = createEmptyGraph({
+        mode: "static",
+        replay_source: null,
+        current_path: null,
+        file_name: null,
+    });
+    state.selectedId = ROOT_AGENT_ID;
+    userHasInteracted = false;
+    render();
+}
+
 async function postCommand(path) {
     if (!state.backendAvailable) {
         if (path === "/reset") {
-            replayStop();
-            state.graph = createEmptyGraph({
-                mode: "static",
-                replay_source: null,
-                current_path: null,
-                file_name: null,
-            });
-            state.selectedId = ROOT_AGENT_ID;
-            userHasInteracted = false;
-            render();
+            clearReplayWorkspace();
         }
         return;
     }
