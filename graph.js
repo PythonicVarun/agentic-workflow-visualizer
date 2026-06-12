@@ -460,6 +460,27 @@ function persistLLMConfig(config) {
     );
 }
 
+function extractSessionIdFromEvents(events) {
+    if (!Array.isArray(events)) return null;
+    for (const evt of events) {
+        if (!evt) continue;
+        const sid = evt.data?.session_id ||
+                    evt.session_id ||
+                    evt.data?.payload?.session_id ||
+                    evt.payload?.session_id;
+        if (sid) return String(sid);
+    }
+    return null;
+}
+
+function getPrimaryAgentStorageKey() {
+    const activeSessionId = sessionLibrary.selectedSessionId ||
+                            replay.logDetails?.session_id ||
+                            state.graph?.log?.session_id ||
+                            null;
+    return activeSessionId || ROOT_AGENT_ID;
+}
+
 function loadAgentSummaries() {
     const raw = safeLocalStorageGet(AGENT_SUMMARY_STORAGE_KEY);
     const parsed = safeJsonParse(raw);
@@ -558,15 +579,20 @@ function hashString(value) {
 function buildNodeSummarySignature(node) {
     if (!node?.id) return "";
     const tools = getNodeToolRuns(node)
-        .slice(0, 6)
         .map((run) =>
             [
                 run.tool_name || "tool",
-                summarize(run.input, 70),
-                summarize(run.output, 70),
+                normalizeToolValue(run.input),
+                normalizeToolValue(run.output),
             ].join("|"),
         )
         .join("||");
+
+    const historySource = (node.history || []).map((h) => ({
+        event_type: h.event_type,
+        timestamp: h.timestamp,
+        data: h.data,
+    }));
 
     const signatureSource = JSON.stringify({
         id: node.id,
@@ -574,9 +600,9 @@ function buildNodeSummarySignature(node) {
         role: node.role,
         status: node.status,
         prompt: node.spawn_prompt,
-        action: node.last_action,
         model: node.model,
         tools,
+        history: historySource,
         toolCount: node.tool_count,
         eventCount: node.event_count,
     });
@@ -585,7 +611,8 @@ function buildNodeSummarySignature(node) {
 
 function getNodeSummaryEntry(node) {
     if (!node?.id) return null;
-    const summary = state.agentSummaries[node.id];
+    const key = node.id === ROOT_AGENT_ID ? getPrimaryAgentStorageKey() : node.id;
+    const summary = state.agentSummaries[key];
     if (!summary) return null;
     if (replay.active) {
         return summary;
@@ -662,7 +689,8 @@ function enqueueNodeSummary(node) {
     if (!hasLLMConfig() || !summaryCanBeGenerated(node)) return;
     const signature = buildNodeSummarySignature(node);
     if (!signature) return;
-    const existing = state.agentSummaries[node.id];
+    const key = node.id === ROOT_AGENT_ID ? getPrimaryAgentStorageKey() : node.id;
+    const existing = state.agentSummaries[key];
     if (existing?.signature === signature && existing.status === "ready") return;
     if (existing?.signature === signature && existing.status === "error") return;
     if (state.summaryInflight.has(node.id)) return;
@@ -972,8 +1000,9 @@ async function processSummaryQueue() {
 
         for (const job of batchJobs) {
             const res = finalResults[job.nodeId];
+            const key = job.nodeId === ROOT_AGENT_ID ? getPrimaryAgentStorageKey() : job.nodeId;
             if (res && !res.error) {
-                state.agentSummaries[job.nodeId] = {
+                state.agentSummaries[key] = {
                     signature: job.signature,
                     status: "ready",
                     name: res.name,
@@ -981,7 +1010,7 @@ async function processSummaryQueue() {
                     updated_at: isoNow(),
                 };
             } else {
-                state.agentSummaries[job.nodeId] = {
+                state.agentSummaries[key] = {
                     signature: job.signature,
                     status: "error",
                     error: res?.error || "Summary generation failed.",
@@ -993,7 +1022,8 @@ async function processSummaryQueue() {
     } catch (error) {
         console.error("Batch summary generation failed:", error);
         for (const job of batchJobs) {
-            state.agentSummaries[job.nodeId] = {
+            const key = job.nodeId === ROOT_AGENT_ID ? getPrimaryAgentStorageKey() : job.nodeId;
+            state.agentSummaries[key] = {
                 signature: job.signature,
                 status: "error",
                 error: trim(
@@ -1214,6 +1244,11 @@ function snapshotNode(node, now) {
             input: normalizeToolValue(run.input),
             output: normalizeToolValue(run.output),
         })),
+        history: (node.history || []).map((h) => ({
+            event_type: h.event_type,
+            timestamp: h.timestamp,
+            data: h.data,
+        })),
     };
 }
 
@@ -1285,6 +1320,7 @@ function buildGraphFromEvents(events, logDetails = {}) {
                 event_count: 0,
                 tool_count: 0,
                 tool_runs: [],
+                history: [],
             };
             nodes.set(agentId, node);
             return node;
@@ -1315,6 +1351,16 @@ function buildGraphFromEvents(events, logDetails = {}) {
         node.updated_at = parseDate(event.timestamp);
         node.event_count += 1;
         if (event.parent_id) node.parent_id = event.parent_id;
+        
+        if (!node.history) {
+            node.history = [];
+        }
+        node.history.push({
+            event_type: event.event_type,
+            timestamp: event.timestamp,
+            data: event.data,
+        });
+        
         return node;
     }
 
@@ -2068,6 +2114,9 @@ function extractSessionIdFromEntries(entries) {
     if (!Array.isArray(entries)) return null;
     for (const entry of entries) {
         if (!entry) continue;
+        if (entry.type === "session_meta" && entry.payload?.id) {
+            return String(entry.payload.id);
+        }
         const sid = entry.payload?.session_id ||
                     entry.event?.data?.session_id ||
                     entry.data?.session_id ||
@@ -2722,6 +2771,7 @@ function replayCodexSession(sessionId) {
             replay_source: root.title,
             current_path: root.filePath,
             file_name: root.fileName,
+            session_id: sessionId,
         },
     );
 }
@@ -4087,7 +4137,10 @@ async function syncLiveDetailedGraph(graph) {
         const entries = parseLogEntries(text);
         const events = extractEventsFromEntries(entries);
         if (!events.length) return;
-        state.graph = buildGraphFromEvents(events, details);
+        
+        const sessionId = extractSessionIdFromEntries(entries) || extractSessionIdFromEvents(events);
+        state.graph = buildGraphFromEvents(events, { ...details, session_id: sessionId });
+        
         state.liveDetailSequence = graph.sequence;
         render();
         queueCompletedAgentSummaries();
@@ -4321,7 +4374,7 @@ function replayTick() {
         const rate = replay.speed === "slow" ? (1 / 500) : (4 / 500);
         const targetToolCalls = replay.toolCallsAnchor + Math.floor(wallElapsed * rate);
         replay.currentIndex = getIndexForToolCalls(targetToolCalls);
-        
+
         // Update simTimeMs to match current index
         if (replay.currentIndex === 0) {
             replay.simTimeMs = 0;
@@ -4456,11 +4509,18 @@ function replayLoadEvents(events, filename, logDetails = {}) {
 
     replay.allEvents = sorted;
     replay.filename = filename;
+
+    let session_id = logDetails.session_id;
+    if (!session_id) {
+        session_id = extractSessionIdFromEvents(sorted);
+    }
+
     replay.logDetails = {
         mode: "replay",
         replay_source: filename || "uploaded log",
         current_path: null,
         file_name: filename || null,
+        session_id,
         ...logDetails,
     };
 
@@ -4539,7 +4599,8 @@ async function replayLogContent(content, filename, showPopup = false) {
         }
     }
 
-    replayLoadEvents(events, filename);
+    const sessionId = extractSessionIdFromEntries(entries) || extractSessionIdFromEvents(events);
+    replayLoadEvents(events, filename, { session_id: sessionId });
 
     // Check for missing subagents in individual uploaded file mode
     const spawnedAgentIds = new Set();
