@@ -125,6 +125,212 @@
                 color: #4a5568 !important;
                 font-weight: 600 !important;
             }
+
+            /* Toggle Buttons Styling */
+            .view-toggle {
+                display: flex;
+                background: var(--surface-strong);
+                padding: 3px;
+                border-radius: 8px;
+                border: 1px solid var(--line);
+                margin-left: 10px;
+                margin-right: 10px;
+            }
+            .toggle-btn {
+                border: none !important;
+                background: transparent !important;
+                color: var(--muted) !important;
+                padding: 6px 14px !important;
+                font-size: 0.8rem !important;
+                font-weight: 700 !important;
+                border-radius: 6px !important;
+                cursor: pointer !important;
+                transition: all 0.2s ease !important;
+                white-space: nowrap !important;
+            }
+            .toggle-btn:hover {
+                color: var(--ink) !important;
+            }
+            .toggle-btn.active {
+                background: var(--surface) !important;
+                color: var(--accent) !important;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+            }
+
+            /* Session Summary Styles */
+            .session-summary-container {
+                padding: 24px;
+                max-width: 1200px;
+                margin: 0 auto;
+                display: flex;
+                flex-direction: column;
+                gap: 24px;
+                overflow-y: auto;
+                height: 100%;
+            }
+
+            .summary-header-row {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 16px;
+                width: 100%;
+            }
+
+            .summary-metric-card {
+                background: var(--surface);
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+                transition:
+                    transform 0.2s ease,
+                    box-shadow 0.2s ease;
+            }
+
+            .summary-metric-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+            }
+
+            .summary-metric-card .metric-lbl {
+                font-size: 0.78rem;
+                font-weight: 700;
+                color: var(--muted);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+
+            .summary-metric-card .metric-val {
+                font-size: 1.8rem;
+                font-weight: 800;
+                color: var(--ink);
+                line-height: 1.2;
+            }
+
+            .summary-grid {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 24px;
+            }
+
+            @media (max-width: 900px) {
+                .summary-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            .summary-table-card {
+                background: var(--surface);
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 24px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            }
+
+            .summary-section-title {
+                font-size: 1.05rem;
+                font-weight: 800;
+                color: var(--ink);
+                margin-top: 0;
+                margin-bottom: 16px;
+                border-bottom: 2px solid var(--surface-strong);
+                padding-bottom: 8px;
+            }
+
+            .summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                text-align: left;
+                font-size: 0.88rem;
+            }
+
+            .summary-table th {
+                font-weight: 700;
+                color: var(--muted);
+                border-bottom: 1px solid var(--line);
+                padding: 10px 12px;
+            }
+
+            .summary-table td {
+                padding: 12px;
+                border-bottom: 1px solid var(--surface-strong);
+                vertical-align: middle;
+            }
+
+            .summary-table tr:hover td {
+                background: var(--surface-strong);
+            }
+
+            .summary-table tr.total-row {
+                background: var(--surface-strong);
+                font-weight: 700;
+            }
+
+            .summary-table tr.total-row td {
+                border-top: 2px solid var(--line);
+                border-bottom: none;
+            }
+
+            .model-badge {
+                background-color: var(--pending-soft);
+                color: var(--pending);
+                font-family: monospace;
+                font-size: 0.75rem;
+                padding: 4px 8px;
+                border-radius: 6px;
+                border: 1px solid var(--line);
+                font-weight: 600;
+                display: inline-block;
+            }
+
+            .token-info {
+                font-size: 0.8rem;
+                color: var(--muted);
+                line-height: 1.4;
+            }
+
+            .token-info strong {
+                color: var(--ink);
+            }
+
+            .cost-text {
+                font-family: monospace;
+                font-weight: 700;
+                color: var(--ink);
+            }
+
+            .metadata-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .metadata-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 0.85rem;
+                padding-bottom: 8px;
+                border-bottom: 1px dashed var(--line);
+            }
+
+            .metadata-item:last-child {
+                border-bottom: none;
+                padding-bottom: 0;
+            }
+
+            .metadata-item strong {
+                color: var(--muted);
+                font-weight: 600;
+            }
+
+            .metadata-item span {
+                color: var(--ink);
+                font-weight: 500;
+            }
         </style>
     </head>
     <body>
@@ -180,6 +386,22 @@
                             >
                             <span class="metric-label">Running</span>
                         </div>
+                        <div class="view-toggle" id="view-toggle">
+                            <button
+                                id="view-summary-btn"
+                                class="toggle-btn"
+                                type="button"
+                            >
+                                Session Summary
+                            </button>
+                            <button
+                                id="view-graph-btn"
+                                class="toggle-btn active"
+                                type="button"
+                            >
+                                Workflow graph
+                            </button>
+                        </div>
                         <button
                             id="sidebar-toggle-button"
                             class="sidebar-toggle"
@@ -217,6 +439,14 @@
                             id="linear-flow"
                             class="linear-flow-container"
                         ></div>
+                        <div
+                            id="session-summary"
+                            class="session-summary-container hidden"
+                        >
+                            <div class="empty-state">
+                                <span>No active session loaded</span>
+                            </div>
+                        </div>
                         <div class="empty-state" id="empty-state">
                             <span>Waiting for activity</span>
                         </div>
