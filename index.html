@@ -9,6 +9,123 @@
             href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M8 16h16M16 8v16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
         />
         <link id="app-stylesheet" rel="stylesheet" href="./style.css" />
+        <style>
+            /* Custom styling to visually differentiate subagent cards from tool cards in the unified activity list */
+            .subagent-item {
+                background: var(--surface) !important;
+                border: 1px solid rgba(15, 118, 110, 0.25) !important;
+                border-radius: 8px !important;
+                box-shadow: 0 4px 10px rgba(15, 118, 110, 0.06) !important;
+                margin-top: 6px;
+                margin-bottom: 6px;
+                transition:
+                    transform 0.2s,
+                    box-shadow 0.2s,
+                    border-color 0.2s !important;
+            }
+            .subagent-item:hover {
+                transform: translateY(-1px);
+                border-color: var(--accent) !important;
+                box-shadow: 0 6px 16px rgba(15, 118, 110, 0.12) !important;
+            }
+            .subagent-header {
+                background: linear-gradient(
+                    90deg,
+                    rgba(15, 118, 110, 0.08) 0%,
+                    rgba(240, 243, 246, 0.3) 100%
+                ) !important;
+                border-bottom: 1px solid rgba(15, 118, 110, 0.1) !important;
+                padding: 10px 14px !important;
+            }
+
+            /* Differentiate status left-borders of subagents (thicker and stylized) */
+            .subagent-item.complete {
+                border-left: 5px solid var(--complete) !important;
+            }
+            .subagent-item.running {
+                border-left: 5px solid var(--running) !important;
+            }
+            .subagent-item.failed {
+                border-left: 5px solid var(--failed) !important;
+            }
+            .subagent-item.pending {
+                border-left: 5px solid var(--pending) !important;
+            }
+
+            .subagent-item.running .subagent-header {
+                background: linear-gradient(
+                    90deg,
+                    rgba(37, 99, 235, 0.08) 0%,
+                    rgba(219, 234, 254, 0.3) 100%
+                ) !important;
+                border-bottom: 1px solid rgba(37, 99, 235, 0.15) !important;
+            }
+            .subagent-title {
+                font-size: 11.5px !important;
+                font-weight: 800 !important;
+                color: var(--accent) !important;
+            }
+            .subagent-item.running .subagent-title {
+                color: var(--running) !important;
+            }
+
+            /* Distinct icon dot pulse animation for subagents */
+            .subagent-item.running .subagent-dot {
+                animation: subagent-pulse 1.25s infinite;
+            }
+            @keyframes subagent-pulse {
+                0%,
+                100% {
+                    opacity: 0.6;
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+                }
+                50% {
+                    opacity: 1;
+                    transform: scale(1.3);
+                    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+                }
+            }
+
+            /* Subtle badge to label it as a sub-agent */
+            .subagent-title-wrap::before {
+                content: "🤖 SUB-AGENT";
+                display: inline-block;
+                width: fit-content;
+                font-size: 8px;
+                font-weight: 900;
+                color: var(--accent);
+                background-color: rgba(15, 118, 110, 0.1);
+                border: 1px solid rgba(15, 118, 110, 0.18);
+                padding: 2px 6px;
+                border-radius: 4px;
+                margin-bottom: 5px;
+                letter-spacing: 0.06em;
+                line-height: 1;
+            }
+            .subagent-item.running .subagent-title-wrap::before {
+                color: var(--running);
+                background-color: rgba(37, 99, 235, 0.08);
+                border-color: rgba(37, 99, 235, 0.18);
+            }
+
+            /* Tool cards styling to look clean and flat, providing strong contrast to subagents */
+            .tool-run-item {
+                background: #ffffff !important;
+                border: 1px solid #e2e8f0 !important;
+                border-radius: 6px !important;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+                margin-bottom: 4px;
+            }
+            .tool-run-header {
+                background: #f8fafc !important;
+                border-bottom: 1px solid #edf2f7;
+            }
+            .tool-run-title {
+                color: #4a5568 !important;
+                font-weight: 600 !important;
+            }
+        </style>
     </head>
     <body>
         <div class="app-shell">
@@ -32,10 +149,16 @@
                         class="button-link"
                         href="/log/current"
                         download
-                        style="display: none;"
+                        style="display: none"
                         >Download Log</a
                     >
-                    <button id="demo-button" type="button" style="display: none;">Run Demo</button>
+                    <button
+                        id="demo-button"
+                        type="button"
+                        style="display: none"
+                    >
+                        Run Demo
+                    </button>
                     <button id="reset-button" type="button">Reset</button>
                 </div>
             </header>
@@ -57,16 +180,43 @@
                             >
                             <span class="metric-label">Running</span>
                         </div>
-                        <button id="sidebar-toggle-button" class="sidebar-toggle" type="button" title="Toggle Sidebar">
-                            <svg id="sidebar-toggle-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <button
+                            id="sidebar-toggle-button"
+                            class="sidebar-toggle"
+                            type="button"
+                            title="Toggle Sidebar"
+                        >
+                            <svg
+                                id="sidebar-toggle-icon"
+                                viewBox="0 0 24 24"
+                                width="18"
+                                height="18"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <rect
+                                    x="3"
+                                    y="3"
+                                    width="18"
+                                    height="18"
+                                    rx="2"
+                                />
                                 <line x1="15" y1="3" x2="15" y2="21" />
-                                <path id="sidebar-toggle-arrow" d="M10 9l3 3-3 3" />
+                                <path
+                                    id="sidebar-toggle-arrow"
+                                    d="M10 9l3 3-3 3"
+                                />
                             </svg>
                         </button>
                     </div>
                     <div class="graph-stage" id="graph-stage">
-                        <div id="linear-flow" class="linear-flow-container"></div>
+                        <div
+                            id="linear-flow"
+                            class="linear-flow-container"
+                        ></div>
                         <div class="empty-state" id="empty-state">
                             <span>Waiting for activity</span>
                         </div>
@@ -82,8 +232,6 @@
                 </div>
 
                 <aside class="inspector" aria-label="Workflow details">
-
-
                     <section
                         class="panel replay-panel collapsible-panel"
                         data-panel-key="replay"
@@ -104,8 +252,9 @@
                                 for="replay-file"
                             >
                                 <div>
-                                    Drop Codex <code class="inline-code">.jsonl</code> logs here or click to
-                                    choose them.
+                                    Drop Codex
+                                    <code class="inline-code">.jsonl</code> logs
+                                    here or click to choose them.
                                 </div>
                             </label>
                             <div class="replay-load-actions">
@@ -125,26 +274,62 @@
                                 </button>
                             </div>
                             <p class="replay-dropnote" id="replay-dropnote"></p>
-                            <div class="subagent-prompt-banner hidden" id="subagent-prompt-banner">
+                            <div
+                                class="subagent-prompt-banner hidden"
+                                id="subagent-prompt-banner"
+                            >
                                 <div class="subagent-prompt-icon">
-                                    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <svg
+                                        viewBox="0 0 20 20"
+                                        width="16"
+                                        height="16"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.8"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
                                         <circle cx="10" cy="10" r="8" />
                                         <line x1="10" y1="6" x2="10" y2="10" />
-                                        <circle cx="10" cy="13.5" r="0.5" fill="currentColor" stroke="none" />
+                                        <circle
+                                            cx="10"
+                                            cy="13.5"
+                                            r="0.5"
+                                            fill="currentColor"
+                                            stroke="none"
+                                        />
                                     </svg>
                                 </div>
                                 <div class="subagent-prompt-content">
-                                    <p class="subagent-prompt-text" id="subagent-prompt-text"></p>
+                                    <p
+                                        class="subagent-prompt-text"
+                                        id="subagent-prompt-text"
+                                    ></p>
                                     <div class="subagent-prompt-actions">
-                                        <button id="subagent-upload-files" class="replay-picker-button" type="button">
+                                        <button
+                                            id="subagent-upload-files"
+                                            class="replay-picker-button"
+                                            type="button"
+                                        >
                                             Upload Subagent Files
                                         </button>
-                                        <button id="subagent-upload-folder" class="replay-picker-button secondary" type="button">
+                                        <button
+                                            id="subagent-upload-folder"
+                                            class="replay-picker-button secondary"
+                                            type="button"
+                                        >
                                             Upload Directory
                                         </button>
                                     </div>
                                 </div>
-                                <button class="subagent-prompt-dismiss" id="subagent-prompt-dismiss" type="button" aria-label="Dismiss">&times;</button>
+                                <button
+                                    class="subagent-prompt-dismiss"
+                                    id="subagent-prompt-dismiss"
+                                    type="button"
+                                    aria-label="Dismiss"
+                                >
+                                    &times;
+                                </button>
                             </div>
                             <input
                                 id="subagent-file-input"
@@ -215,14 +400,22 @@
                                         <polyline points="3,4.5 6,7.5 9,4.5" />
                                     </svg>
                                 </button>
-                                <div class="session-search-container hidden" id="session-search-container">
+                                <div
+                                    class="session-search-container hidden"
+                                    id="session-search-container"
+                                >
                                     <input
                                         id="session-search-input"
                                         class="session-search-input"
                                         type="text"
                                         placeholder="Search sessions (title, model, ID...)"
                                     />
-                                    <button id="session-search-clear" class="session-search-clear hidden" type="button" aria-label="Clear search">
+                                    <button
+                                        id="session-search-clear"
+                                        class="session-search-clear hidden"
+                                        type="button"
+                                        aria-label="Clear search"
+                                    >
                                         &times;
                                     </button>
                                 </div>
@@ -238,7 +431,6 @@
                                     the primary sessions.
                                 </div>
                             </div>
-
                         </div>
                         <!-- Replay Player Controls -->
                         <div class="replay-player" id="replay-player">
@@ -312,9 +504,7 @@
                                                 height="10"
                                                 rx="0.8"
                                             />
-                                            <polygon
-                                                points="14,4 7,9 14,14"
-                                            />
+                                            <polygon points="14,4 7,9 14,14" />
                                         </svg>
                                     </button>
                                     <button
@@ -359,12 +549,28 @@
                                 <div class="replay-speed-control">
                                     <span class="speed-label">Speed</span>
                                     <div class="speed-info-tooltip">
-                                        <button class="tooltip-trigger" type="button" aria-label="Speed info">?</button>
+                                        <button
+                                            class="tooltip-trigger"
+                                            type="button"
+                                            aria-label="Speed info"
+                                        >
+                                            ?
+                                        </button>
                                         <div class="tooltip-box">
                                             <h3>Speed Modes</h3>
-                                            <p><strong>Realtime mode:</strong> Replays at 10x the original speed.</p>
-                                            <p><strong>Slow mode:</strong> Runs 1 tool call every 1/2 second.</p>
-                                            <p><strong>Fast mode:</strong> Runs 4 tool calls per 1/2 second.</p>
+                                            <p>
+                                                <strong>Realtime mode:</strong>
+                                                Replays at 10x the original
+                                                speed.
+                                            </p>
+                                            <p>
+                                                <strong>Slow mode:</strong> Runs
+                                                1 tool call every 1/2 second.
+                                            </p>
+                                            <p>
+                                                <strong>Fast mode:</strong> Runs
+                                                4 tool calls per 1/2 second.
+                                            </p>
                                         </div>
                                     </div>
                                     <select
@@ -372,21 +578,19 @@
                                         class="replay-speed-select"
                                         aria-label="Replay speed"
                                     >
-                                        <option value="realtime" selected>Realtime mode</option>
+                                        <option value="realtime" selected>
+                                            Realtime mode
+                                        </option>
                                         <option value="slow">Slow mode</option>
                                         <option value="fast">Fast mode</option>
                                     </select>
                                 </div>
-                                <span
-                                    class="replay-elapsed"
-                                    id="replay-elapsed"
+                                <span class="replay-elapsed" id="replay-elapsed"
                                     >0s / 0s</span
                                 >
                             </div>
                         </div>
                     </section>
-
-
                 </aside>
             </main>
         </div>
@@ -402,7 +606,10 @@
                 <div class="agent-modal-header">
                     <div class="agent-modal-title-wrap">
                         <h2 id="agent-modal-title">Agent Details</h2>
-                        <p class="agent-modal-subtitle" id="agent-modal-subtitle">
+                        <p
+                            class="agent-modal-subtitle"
+                            id="agent-modal-subtitle"
+                        >
                             Click an agent to inspect its full activity.
                         </p>
                     </div>
@@ -476,7 +683,9 @@
                     </div>
                     <section class="tool-history-section">
                         <div class="tool-history-header">
-                            <span class="tool-history-title">Tool Activity</span>
+                            <span class="tool-history-title"
+                                >Tool Activity</span
+                            >
                             <span
                                 class="tool-history-count"
                                 id="agent-modal-tool-history-count"
@@ -511,9 +720,8 @@
                         <h2 id="config-modal-title">LLM Configuration</h2>
                         <p class="agent-modal-subtitle">
                             Saved only in this browser. The configured endpoint
-                            must expose an OpenAI-compatible
-                            `/chat/completions` route and allow browser
-                            requests.
+                            must expose an OpenAI-compatible `/chat/completions`
+                            route and allow browser requests.
                         </p>
                     </div>
                     <button
@@ -588,19 +796,28 @@
                 </form>
             </section>
         </div>
-        <div class="config-modal hidden" id="subagent-warning-modal" aria-hidden="true">
-            <div class="agent-modal-backdrop" id="subagent-warning-modal-backdrop"></div>
+        <div
+            class="config-modal hidden"
+            id="subagent-warning-modal"
+            aria-hidden="true"
+        >
+            <div
+                class="agent-modal-backdrop"
+                id="subagent-warning-modal-backdrop"
+            ></div>
             <section
                 class="config-modal-dialog"
                 id="subagent-warning-modal-dialog"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="subagent-warning-modal-title"
-                style="max-width: min(580px, 100%); min-width: min(460px, 100%);"
+                style="max-width: min(580px, 100%); min-width: min(460px, 100%)"
             >
                 <div class="agent-modal-header">
                     <div class="agent-modal-title-wrap">
-                        <h2 id="subagent-warning-modal-title">Missing Subagents</h2>
+                        <h2 id="subagent-warning-modal-title">
+                            Missing Subagents
+                        </h2>
                         <p class="agent-modal-subtitle">
                             Spawned subagent execution details are missing.
                         </p>
@@ -625,15 +842,41 @@
                         </svg>
                     </button>
                 </div>
-                <div class="agent-modal-body" style="padding: 22px; display: grid; gap: 18px;">
-                    <p id="subagent-warning-modal-text" style="margin: 0; line-height: 1.5; font-size: 0.9rem; color: var(--ink);"></p>
-                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
-                        <button id="subagent-warning-modal-upload" class="replay-picker-button" type="button">
+                <div
+                    class="agent-modal-body"
+                    style="padding: 22px; display: grid; gap: 18px"
+                >
+                    <p
+                        id="subagent-warning-modal-text"
+                        style="
+                            margin: 0;
+                            line-height: 1.5;
+                            font-size: 0.9rem;
+                            color: var(--ink);
+                        "
+                    ></p>
+                    <div
+                        style="
+                            display: flex;
+                            gap: 10px;
+                            justify-content: flex-end;
+                            margin-top: 10px;
+                        "
+                    >
+                        <button
+                            id="subagent-warning-modal-upload"
+                            class="replay-picker-button"
+                            type="button"
+                        >
                             Upload Subagent Logs
                         </button>
-                        <button id="subagent-warning-modal-folder" class="replay-picker-button secondary" type="button">
-                                Upload Directory
-                            </button>
+                        <button
+                            id="subagent-warning-modal-folder"
+                            class="replay-picker-button secondary"
+                            type="button"
+                        >
+                            Upload Directory
+                        </button>
                     </div>
                 </div>
             </section>
@@ -641,4 +884,3 @@
         <script type="module" src="./graph.js"></script>
     </body>
 </html>
-
