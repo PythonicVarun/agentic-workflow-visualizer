@@ -970,11 +970,7 @@ dd {
     background: #0f172a;
     border-radius: 8px;
     color: #d8f4ef;
-    font-family:
-        "IBM Plex Mono",
-        "Cascadia Code",
-        Consolas,
-        monospace;
+    font-family: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
     font-size: 0.72rem;
     line-height: 1.5;
     margin: 0;
@@ -1194,7 +1190,6 @@ dd {
     }
 }
 
-
 /* ═══════════════════════════════════════════════════════════ */
 /* Demo Logs Library                                           */
 /* ═══════════════════════════════════════════════════════════ */
@@ -1294,7 +1289,9 @@ dd {
     font-size: 0.8rem;
     font-weight: 500;
     outline: none;
-    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    transition:
+        border-color 0.18s ease,
+        box-shadow 0.18s ease;
 }
 
 .session-search-input:focus {
@@ -1902,7 +1899,9 @@ body.resizing-row * {
     width: 600px;
     max-width: calc(100% - 48px);
     z-index: 100;
-    box-shadow: 0 10px 30px rgb(24 33 43 / 15%), 0 1px 8px rgb(24 33 43 / 10%);
+    box-shadow:
+        0 10px 30px rgb(24 33 43 / 15%),
+        0 1px 8px rgb(24 33 43 / 10%);
     background: rgba(255, 255, 255, 0.95);
     border: 1px solid var(--line);
     border-radius: 12px;
@@ -2277,13 +2276,17 @@ button.tooltip-trigger:focus + .tooltip-box {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: box-shadow 0.2s, border-color 0.2s;
+    transition:
+        box-shadow 0.2s,
+        border-color 0.2s;
     user-select: none;
     cursor: pointer;
 }
 
 .tool-run-item:hover {
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    box-shadow:
+        0 4px 6px -1px rgb(0 0 0 / 0.05),
+        0 2px 4px -2px rgb(0 0 0 / 0.05);
     border-color: #cbd5e1;
 }
 
@@ -2328,8 +2331,15 @@ button.tooltip-trigger:focus + .tooltip-box {
 }
 
 @keyframes tool-pulse {
-    0%, 100% { opacity: 0.5; transform: scale(0.9); }
-    50% { opacity: 1; transform: scale(1.25); }
+    0%,
+    100% {
+        opacity: 0.5;
+        transform: scale(0.9);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.25);
+    }
 }
 
 .tool-run-title-wrap {
@@ -2461,7 +2471,9 @@ button.tooltip-trigger:focus + .tooltip-box {
 
 .node-card-html.selected {
     border: 2px solid var(--accent);
-    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15), var(--shadow);
+    box-shadow:
+        0 0 0 3px rgba(15, 118, 110, 0.15),
+        var(--shadow);
 }
 
 /* Highlight flash animation */
@@ -2513,7 +2525,8 @@ button.tooltip-trigger:focus + .tooltip-box {
 }
 
 @keyframes pulse-html {
-    0%, 100% {
+    0%,
+    100% {
         transform: scale(0.9);
         opacity: 0.4;
     }
@@ -2705,14 +2718,18 @@ button.tooltip-trigger:focus + .tooltip-box {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: box-shadow 0.2s, border-color 0.2s;
+    transition:
+        box-shadow 0.2s,
+        border-color 0.2s;
     user-select: none;
     cursor: pointer;
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .subagent-item:hover {
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    box-shadow:
+        0 4px 6px -1px rgb(0 0 0 / 0.05),
+        0 2px 4px -2px rgb(0 0 0 / 0.05);
     border-color: var(--accent);
 }
 
