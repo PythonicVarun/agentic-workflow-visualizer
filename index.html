@@ -4,6 +4,13 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Agentic Workflow Visualizer</title>
+        <script>
+            (() => {
+                if (localStorage.getItem("awv-theme") === "light") {
+                    document.documentElement.classList.add("light-theme");
+                }
+            })();
+        </script>
         <link
             rel="icon"
             href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M8 16h16M16 8v16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
@@ -346,6 +353,15 @@
                         <span id="connection-text">Static Replay</span>
                     </div>
                     <div class="log-status" id="log-status">Live log</div>
+                    <button
+                        id="theme-toggle"
+                        class="theme-toggle"
+                        type="button"
+                        aria-label="Toggle light theme"
+                    >
+                        <span class="theme-moon" aria-hidden="true">☾</span>
+                        <span class="theme-sun">☀</span>
+                    </button>
                     <button id="llm-config-button" type="button">
                         Configure LLM
                     </button>
@@ -393,6 +409,13 @@
                                 type="button"
                             >
                                 Session Summary
+                            </button>
+                            <button
+                                id="view-analytics-btn"
+                                class="toggle-btn"
+                                type="button"
+                            >
+                                Project Analytics
                             </button>
                             <button
                                 id="view-graph-btn"
@@ -447,6 +470,10 @@
                                 <span>No active session loaded</span>
                             </div>
                         </div>
+                        <div
+                            id="project-dashboard"
+                            class="project-dashboard hidden"
+                        ></div>
                         <div class="empty-state" id="empty-state">
                             <span>Waiting for activity</span>
                         </div>
@@ -488,20 +515,20 @@
                                 </div>
                             </label>
                             <div class="replay-load-actions">
-                                <button
+                                <label
                                     id="pick-log-files"
                                     class="replay-picker-button"
-                                    type="button"
+                                    for="replay-file"
                                 >
                                     Choose Log Files
-                                </button>
-                                <button
+                                </label>
+                                <label
                                     id="pick-log-folder"
                                     class="replay-picker-button secondary"
-                                    type="button"
+                                    for="replay-folder"
                                 >
                                     Choose Directory
-                                </button>
+                                </label>
                             </div>
                             <p class="replay-dropnote" id="replay-dropnote"></p>
                             <div

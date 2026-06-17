@@ -8,6 +8,7 @@ This branch (`gh-pages`) contains the standalone static web assets. No python ba
 
 - **📊 Interactive SVG Graph**: Visualizes branching, non-linear sub-agent workflows.
 - **🪙 Token & Cost Summarization**: Displays a comprehensive **Session Summary** tab showing token counts and USD costs calculated client-side.
+- **📁 Project Cost Dashboard**: Groups imported Codex sessions by working directory, shows per-project spend, and compares actual token usage against selected what-if model prices.
 - **💾 Drag & Drop Replay**: Load any workflow log (.jsonl format) directly in the browser to replay it.
 - **✨ Sleek Aesthetics**: Modern dark/light modes and smooth SVG interactions.
 
@@ -54,6 +55,17 @@ Model costs are calculated based on the token pricing defined in `model_pricing.
 - **Anthropic Claude Models**: Pricing is retrieved from the official [Anthropic Claude Pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 
 For custom or local models where pricing is not known, the estimated cost defaults to `$0.00000`. You can configure or override custom model costs by editing the `model_pricing.json` file.
+
+## Project Cost Dashboard
+
+Choose **Choose Directory** and select a folder containing Codex session logs (typically `~/.codex/sessions`). Open **Project Analytics** to see every imported project and its sessions. A project is the normalized `cwd` recorded by Codex; sessions without a working directory are grouped under **Unknown project**.
+
+The dashboard deliberately separates data quality:
+
+- **Actual** sessions contain native Codex `token_count` records. Their costs contribute to project totals and the what-if model comparison.
+- **Estimated-only** sessions do not contain token usage. They are listed for visibility but excluded from total and what-if costs, rather than presenting synthesized values as spend.
+
+Select one or more models in the dashboard to price each project's recorded input and output token totals using `model_pricing.json`. These comparisons cover token rates only. They do not include cached-input, reasoning, tool, regional, batch, priority, or other provider-specific charges. Imported data stays in the current browser session; this static app does not upload logs or provide a shared team database.
 
 ## 🔄 Replaying a Workflow
 

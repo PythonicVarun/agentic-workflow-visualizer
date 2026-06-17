@@ -43,6 +43,165 @@ function getModelPricing(modelName) {
     return [0, 0];
 }
 
+function priceTokens(inputTokens, outputTokens, modelName) {
+    const [inputRate, outputRate] = getModelPricing(modelName);
+    if (inputRate === 0 && outputRate === 0) return null;
+    return (
+        (Number(inputTokens || 0) / 1000000) * inputRate +
+        (Number(outputTokens || 0) / 1000000) * outputRate
+    );
+}
+
+function normalizeProjectPath(cwd) {
+    const value = String(cwd || "")
+        .trim()
+        .replace(/\\/g, "/");
+    if (!value) return "Unknown project";
+    return value.replace(/\/+$/, "") || "/";
+}
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(
+        /[&<>"']/g,
+        (character) =>
+            ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+            })[character],
+    );
+}
+
+function getSessionUsage(entries) {
+    let usage = null;
+    entries.forEach((entry) => {
+        const tokenUsage =
+            entry?.type === "event_msg" && entry.payload?.type === "token_count"
+                ? entry.payload.info?.total_token_usage
+                : null;
+        if (!tokenUsage) return;
+        usage = {
+            inputTokens: Number(tokenUsage.input_tokens || 0),
+            outputTokens: Number(tokenUsage.output_tokens || 0),
+            totalTokens: Number(tokenUsage.total_tokens || 0),
+        };
+    });
+    return usage;
+}
+
+function buildAnalyticsRecord(session) {
+    const usage = getSessionUsage(session.entries || []);
+    const model =
+        session.meta?.model ||
+        extractModelFromEntries(session.entries) ||
+        "Unknown";
+    const cost = usage
+        ? priceTokens(usage.inputTokens, usage.outputTokens, model)
+        : null;
+    return {
+        id: session.id,
+        projectPath: normalizeProjectPath(session.cwd),
+        title: session.title || session.fileName || session.id,
+        model,
+        startedAt: session.startedAt,
+        endedAt: session.updatedAt || session.startedAt,
+        inputTokens: usage?.inputTokens || 0,
+        outputTokens: usage?.outputTokens || 0,
+        totalTokens: usage?.totalTokens || 0,
+        cost,
+        costProvenance: usage ? "actual" : "estimated",
+        source: session.filePath || session.fileName || "uploaded log",
+    };
+}
+
+function buildProjectAnalytics(sessions) {
+    const projects = new Map();
+    sessions.map(buildAnalyticsRecord).forEach((record) => {
+        const project = projects.get(record.projectPath) || {
+            path: record.projectPath,
+            sessions: [],
+            actualCost: 0,
+            estimatedSessions: 0,
+            unpricedActualSessions: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            start: record.startedAt,
+            end: record.endedAt,
+        };
+        project.sessions.push(record);
+        project.start =
+            parseDate(record.startedAt) < parseDate(project.start)
+                ? record.startedAt
+                : project.start;
+        project.end =
+            parseDate(record.endedAt) > parseDate(project.end)
+                ? record.endedAt
+                : project.end;
+        if (record.costProvenance === "actual") {
+            if (record.cost === null) {
+                project.unpricedActualSessions += 1;
+            } else {
+                project.actualCost += record.cost;
+            }
+            project.inputTokens += record.inputTokens;
+            project.outputTokens += record.outputTokens;
+        } else {
+            project.estimatedSessions += 1;
+        }
+        projects.set(record.projectPath, project);
+    });
+    return Array.from(projects.values()).sort((a, b) =>
+        a.path.localeCompare(b.path),
+    );
+}
+
+function runProjectAnalyticsChecks() {
+    const actualSession = {
+        id: "actual",
+        cwd: "/work/demo/",
+        title: "Actual session",
+        meta: { model: "gpt-5" },
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+        entries: [
+            {
+                type: "event_msg",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: {
+                            input_tokens: 1000000,
+                            output_tokens: 1000000,
+                            total_tokens: 2000000,
+                        },
+                    },
+                },
+            },
+        ],
+    };
+    const estimatedSession = {
+        ...actualSession,
+        id: "estimated",
+        cwd: "/work/demo",
+        entries: [],
+    };
+    const [project] = buildProjectAnalytics([actualSession, estimatedSession]);
+    console.assert(
+        project.path === "/work/demo" &&
+            project.sessions.length === 2 &&
+            project.estimatedSessions === 1,
+        "Project analytics grouping check failed.",
+    );
+    if (getModelPricing("gpt-5")[0] !== 0) {
+        console.assert(
+            priceTokens(1000000, 1000000, "gpt-5") === 11.25,
+            "Project analytics scenario pricing check failed.",
+        );
+    }
+}
+
 const state = {
     activeTab: "summary",
     graph: {
@@ -73,6 +232,9 @@ const state = {
     toolQueue: [],
     toolProcessing: false,
     toolInflight: new Set(),
+    analyticsProjectFilter: "",
+    analyticsScenarioModels: [],
+    analyticsCompareMenuOpen: false,
 };
 
 const sessionLibrary = {
@@ -88,13 +250,17 @@ const sessionLibrary = {
     appendFolderUpload: false,
     initialSessionId: null,
     searchQuery: "",
+    analyticsRecords: [],
 };
 
 const els = {
     svg: document.querySelector("#linear-flow"),
     sessionSummary: document.querySelector("#session-summary"),
+    projectDashboard: document.querySelector("#project-dashboard"),
     viewGraphBtn: document.querySelector("#view-graph-btn"),
     viewSummaryBtn: document.querySelector("#view-summary-btn"),
+    viewAnalyticsBtn: document.querySelector("#view-analytics-btn"),
+    themeToggle: document.querySelector("#theme-toggle"),
     empty: document.querySelector("#empty-state"),
     connection: document.querySelector("#connection"),
     connectionText: document.querySelector("#connection-text"),
@@ -2310,6 +2476,8 @@ function rebuildSessionLibrary(descriptors) {
                 parseDate(b.updatedAt).getTime() -
                 parseDate(a.updatedAt).getTime(),
         );
+    sessionLibrary.analyticsRecords =
+        sessionLibrary.sessions.map(buildAnalyticsRecord);
     sessionLibrary.sessionMap = new Map(
         sessionLibrary.sessions.map((session) => [session.id, session]),
     );
@@ -2855,6 +3023,8 @@ function translateCodexSession(session, rootSessionId, spawnHints) {
                 label: "Primary Agent",
                 role: "primary",
                 model: modelName,
+                cwd: session.cwd || null,
+                session_id: session.id,
             },
         });
     } else {
@@ -3074,6 +3244,7 @@ function replayCodexSession(sessionId) {
         current_path: root.filePath,
         file_name: root.fileName,
         session_id: sessionId,
+        cwd: root.cwd || null,
     });
 }
 
@@ -4536,6 +4707,164 @@ function renderSummary() {
     `;
 }
 
+function formatCost(cost) {
+    if (cost === null || cost === undefined) return "Unavailable";
+    if (cost === 0) return "$0.00";
+    if (cost < 0.01) return `$${cost.toFixed(4)}`;
+    return `$${cost.toFixed(2)}`;
+}
+
+function projectLabel(path) {
+    return path === "Unknown project" ? path : basename(path);
+}
+
+function sessionDuration(session) {
+    return Math.max(
+        0,
+        Math.floor(
+            (parseDate(session.endedAt).getTime() -
+                parseDate(session.startedAt).getTime()) /
+                1000,
+        ),
+    );
+}
+
+function renderProjectDashboard() {
+    if (!els.projectDashboard) return;
+    const projects = buildProjectAnalytics(sessionLibrary.sessions);
+    if (!projects.length) {
+        els.projectDashboard.innerHTML = `<div class="analytics-empty"><h2>Import Codex sessions to begin</h2><p>Choose a Codex sessions directory to group imports by working directory and compare project costs.</p></div>`;
+        return;
+    }
+
+    const filteredProjects = state.analyticsProjectFilter
+        ? projects.filter(
+              (project) => project.path === state.analyticsProjectFilter,
+          )
+        : projects;
+    const allRecords = projects.flatMap((project) => project.sessions);
+    const actualRecords = allRecords.filter(
+        (record) => record.costProvenance === "actual",
+    );
+    const actualCost = actualRecords.reduce(
+        (total, record) => total + (record.cost ?? 0),
+        0,
+    );
+    const actualTokens = actualRecords.reduce(
+        (total, record) => total + record.inputTokens + record.outputTokens,
+        0,
+    );
+    const unpricedActualSessions = actualRecords.filter(
+        (record) => record.cost === null,
+    ).length;
+    const scenarios = state.analyticsScenarioModels;
+    const selectedProject = projects.find(
+        (project) => project.path === state.analyticsProjectFilter,
+    );
+    const projectOptions = projects
+        .map(
+            (project) =>
+                `<option value="${escapeHtml(project.path)}"${project.path === state.analyticsProjectFilter ? " selected" : ""}>${escapeHtml(projectLabel(project.path))}</option>`,
+        )
+        .join("");
+    const modelChecklist = Object.keys(MODEL_PRICING)
+        .sort()
+        .map(
+            (model) =>
+                `<label class="analytics-model-option"><input data-scenario-model="${escapeHtml(model)}" type="checkbox"${scenarios.includes(model) ? " checked" : ""}><span>${escapeHtml(model)}</span></label>`,
+        )
+        .join("");
+    const scenarioChips = scenarios.length
+        ? scenarios
+              .map(
+                  (model) =>
+                      `<button class="analytics-chip" data-remove-scenario="${escapeHtml(model)}" type="button">${escapeHtml(model)} <span aria-hidden="true">×</span></button>`,
+              )
+              .join("")
+        : `<span class="analytics-hint">Select models to compare token costs.</span>`;
+    const projectRows = filteredProjects
+        .map((project) => {
+            const scenarioCosts = scenarios
+                .map((model) => {
+                    const cost = priceTokens(
+                        project.inputTokens,
+                        project.outputTokens,
+                        model,
+                    );
+                    return `<span><strong>${escapeHtml(model)}</strong>${formatCost(cost)}</span>`;
+                })
+                .join("");
+            return `<tr>
+                <td class="analytics-project-cell"><button class="analytics-project-link" data-project="${escapeHtml(project.path)}" type="button">${escapeHtml(projectLabel(project.path))}</button><span title="${escapeHtml(project.path)}">${escapeHtml(project.path)}</span></td>
+                <td>${project.sessions.length}</td>
+                <td>${formatDateTime(project.start)}<br><span class="analytics-muted">to ${formatDateTime(project.end)}</span></td>
+                <td><strong>${formatCost(project.actualCost)}</strong>${project.unpricedActualSessions ? `<span class="analytics-muted">${project.unpricedActualSessions} unpriced</span>` : ""}</td>
+                <td>${project.estimatedSessions || "-"}</td>
+                <td class="scenario-values">${scenarioCosts || "-"}</td>
+            </tr>`;
+        })
+        .join("");
+    const sessions = filteredProjects
+        .flatMap((project) => project.sessions)
+        .sort(
+            (a, b) =>
+                parseDate(b.startedAt).getTime() -
+                parseDate(a.startedAt).getTime(),
+        );
+    const sessionRows = sessions
+        .map(
+            (session) => `<tr>
+                <td><strong>${escapeHtml(session.title)}</strong></td>
+                <td><span class="model-badge">${escapeHtml(session.model)}</span></td>
+                <td>${formatDateTime(session.startedAt)}</td>
+                <td>${formatElapsed(sessionDuration(session))}</td>
+                <td>${session.costProvenance === "actual" ? session.totalTokens.toLocaleString() : "Not recorded"}</td>
+                <td><span class="cost-provenance ${session.costProvenance}">${session.costProvenance}</span></td>
+                <td>${session.costProvenance === "actual" ? formatCost(session.cost) : "Excluded"}</td>
+                <td><button class="analytics-replay" data-session-id="${escapeHtml(session.id)}" type="button">Replay</button></td>
+            </tr>`,
+        )
+        .join("");
+    const sessionCards = sessions
+        .map(
+            (session) => `<article class="analytics-session-card">
+                <div><strong>${escapeHtml(session.title)}</strong><span class="model-badge">${escapeHtml(session.model)}</span></div>
+                <div class="analytics-session-status"><span class="cost-provenance ${session.costProvenance}">${session.costProvenance}</span><strong>${session.costProvenance === "actual" ? formatCost(session.cost) : "Excluded"}</strong></div>
+                <dl><div><dt>Started</dt><dd>${formatDateTime(session.startedAt)}</dd></div><div><dt>Duration</dt><dd>${formatElapsed(sessionDuration(session))}</dd></div><div><dt>Tokens</dt><dd>${session.costProvenance === "actual" ? session.totalTokens.toLocaleString() : "Not recorded"}</dd></div></dl>
+                <button class="analytics-replay" data-session-id="${escapeHtml(session.id)}" type="button">Replay session</button>
+            </article>`,
+        )
+        .join("");
+
+    els.projectDashboard.innerHTML = `
+        <section class="analytics-header">
+            <div><span class="eyebrow">Imported Codex portfolio</span><h2>Cost intelligence</h2><p>Actual spend is calculated from recorded token usage. Estimated-only sessions remain visible but are excluded from comparisons.</p></div>
+            <span class="analytics-import-status">${allRecords.length} sessions imported</span>
+        </section>
+        <section class="analytics-toolbar" aria-label="Analytics filters">
+            <label>Project<select id="analytics-project-filter"><option value="">All projects</option>${projectOptions}</select></label>
+            <div class="analytics-compare"><button id="analytics-compare-toggle" class="analytics-compare-trigger" type="button" aria-expanded="${state.analyticsCompareMenuOpen}">Compare models <span>${scenarios.length}</span></button>${state.analyticsCompareMenuOpen ? `<div class="analytics-model-menu">${modelChecklist}</div>` : ""}</div>
+            ${selectedProject ? `<button id="analytics-clear-project" class="analytics-clear-filter" type="button">Clear project filter</button>` : ""}
+            <div class="analytics-chip-list">${scenarioChips}</div>
+        </section>
+        <div class="analytics-kpis">
+            <article><span>Projects</span><strong>${projects.length}</strong></article>
+            <article><span>Imported sessions</span><strong>${allRecords.length}</strong></article>
+            <article><span>Actual cost</span><strong>${formatCost(actualCost)}</strong>${unpricedActualSessions ? `<small>${unpricedActualSessions} unpriced session${unpricedActualSessions === 1 ? "" : "s"}</small>` : ""}</article>
+            <article><span>Actual tokens</span><strong>${actualTokens.toLocaleString()}</strong></article>
+            <article><span>Estimated-only</span><strong>${allRecords.length - actualRecords.length}</strong></article>
+        </div>
+        <section class="analytics-card">
+            <div class="analytics-card-heading"><div><span class="eyebrow">Portfolio</span><h3>Projects</h3></div><span>Choose a project to inspect its sessions.</span></div>
+            <div class="analytics-table-wrap"><table class="analytics-table analytics-project-table"><thead><tr><th>Project</th><th>Sessions</th><th>Activity</th><th>Actual spend</th><th>Estimated</th><th>What-if cost</th></tr></thead><tbody>${projectRows}</tbody></table></div>
+        </section>
+        <section class="analytics-card">
+            <div class="analytics-card-heading"><div><span class="eyebrow">${selectedProject ? "Project drill-down" : "Portfolio activity"}</span><h3 title="${selectedProject ? escapeHtml(selectedProject.path) : ""}">${selectedProject ? escapeHtml(projectLabel(selectedProject.path)) : "All sessions"}</h3></div><span>${sessions.length} session${sessions.length === 1 ? "" : "s"} · actual-token sessions can be compared.</span></div>
+            <div class="analytics-table-wrap analytics-session-table"><table class="analytics-table"><thead><tr><th>Session</th><th>Model</th><th>Started</th><th>Duration</th><th>Tokens</th><th>Usage</th><th>Cost</th><th>Action</th></tr></thead><tbody>${sessionRows}</tbody></table></div>
+            <div class="analytics-session-cards">${sessionCards}</div>
+        </section>`;
+}
+
 function renderFeed() {
     if (!els.feed || !els.sequence) return;
     let events = state.graph.events || [];
@@ -4705,19 +5034,35 @@ function render() {
 
     const nodes = state.graph.nodes || [];
 
-    if (state.activeTab === "summary") {
+    if (state.activeTab === "analytics") {
+        if (els.svg) els.svg.classList.add("hidden");
+        if (els.sessionSummary) els.sessionSummary.classList.add("hidden");
+        if (els.projectDashboard)
+            els.projectDashboard.classList.remove("hidden");
+        if (els.empty) els.empty.classList.add("hidden");
+        if (els.viewGraphBtn) els.viewGraphBtn.classList.remove("active");
+        if (els.viewSummaryBtn) els.viewSummaryBtn.classList.remove("active");
+        if (els.viewAnalyticsBtn) els.viewAnalyticsBtn.classList.add("active");
+        renderProjectDashboard();
+    } else if (state.activeTab === "summary") {
         if (els.svg) els.svg.classList.add("hidden");
         if (els.sessionSummary) els.sessionSummary.classList.remove("hidden");
+        if (els.projectDashboard) els.projectDashboard.classList.add("hidden");
         if (els.empty) els.empty.classList.add("hidden");
         if (els.viewGraphBtn) els.viewGraphBtn.classList.remove("active");
         if (els.viewSummaryBtn) els.viewSummaryBtn.classList.add("active");
+        if (els.viewAnalyticsBtn)
+            els.viewAnalyticsBtn.classList.remove("active");
         renderSummary();
     } else {
         if (els.svg) els.svg.classList.remove("hidden");
         if (els.sessionSummary) els.sessionSummary.classList.add("hidden");
+        if (els.projectDashboard) els.projectDashboard.classList.add("hidden");
         if (els.empty) els.empty.classList.toggle("hidden", nodes.length > 0);
         if (els.viewGraphBtn) els.viewGraphBtn.classList.add("active");
         if (els.viewSummaryBtn) els.viewSummaryBtn.classList.remove("active");
+        if (els.viewAnalyticsBtn)
+            els.viewAnalyticsBtn.classList.remove("active");
         renderGraph();
     }
 
@@ -5325,6 +5670,102 @@ els.viewSummaryBtn?.addEventListener("click", () => {
     state.activeTab = "summary";
     render();
 });
+els.viewAnalyticsBtn?.addEventListener("click", () => {
+    state.activeTab = "analytics";
+    render();
+});
+els.themeToggle?.addEventListener("click", (event) => {
+    const toggleTheme = () => {
+        const isLight =
+            document.documentElement.classList.toggle("light-theme");
+        localStorage.setItem("awv-theme", isLight ? "light" : "dark");
+    };
+    const reducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+    ).matches;
+    if (!document.startViewTransition || reducedMotion) {
+        toggleTheme();
+        return;
+    }
+    const x = event.clientX || window.innerWidth / 2;
+    const y = event.clientY || window.innerHeight / 2;
+    const radius = Math.hypot(
+        Math.max(x, window.innerWidth - x),
+        Math.max(y, window.innerHeight - y),
+    );
+    const transition = document.startViewTransition(toggleTheme);
+    transition.ready.then(() => {
+        document.documentElement.animate(
+            {
+                clipPath: [
+                    `circle(0 at ${x}px ${y}px)`,
+                    `circle(${radius}px at ${x}px ${y}px)`,
+                ],
+            },
+            {
+                duration: 500,
+                easing: "ease-out",
+                pseudoElement: "::view-transition-new(root)",
+            },
+        );
+    });
+});
+els.projectDashboard?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (
+        target instanceof HTMLSelectElement &&
+        target.id === "analytics-project-filter"
+    ) {
+        state.analyticsProjectFilter = target.value;
+        render();
+    }
+    if (target instanceof HTMLInputElement && target.dataset.scenarioModel) {
+        const model = target.dataset.scenarioModel;
+        state.analyticsScenarioModels = target.checked
+            ? [...new Set([...state.analyticsScenarioModels, model])]
+            : state.analyticsScenarioModels.filter(
+                  (selectedModel) => selectedModel !== model,
+              );
+        render();
+    }
+});
+els.projectDashboard?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const projectButton = target.closest("[data-project]");
+    if (projectButton instanceof HTMLElement) {
+        state.analyticsProjectFilter = projectButton.dataset.project || "";
+        render();
+        return;
+    }
+    const compareToggle = target.closest("#analytics-compare-toggle");
+    if (compareToggle) {
+        state.analyticsCompareMenuOpen = !state.analyticsCompareMenuOpen;
+        render();
+        return;
+    }
+    const removeScenario = target.closest("[data-remove-scenario]");
+    if (removeScenario instanceof HTMLElement) {
+        const model = removeScenario.dataset.removeScenario;
+        state.analyticsScenarioModels = state.analyticsScenarioModels.filter(
+            (selectedModel) => selectedModel !== model,
+        );
+        render();
+        return;
+    }
+    if (target.closest("#analytics-clear-project")) {
+        state.analyticsProjectFilter = "";
+        render();
+        return;
+    }
+    const replayButton = target.closest("[data-session-id]");
+    if (replayButton instanceof HTMLElement) {
+        const sessionId = replayButton.dataset.sessionId;
+        if (!sessionId) return;
+        state.activeTab = "graph";
+        replayCodexSession(sessionId);
+    }
+});
 els.llmConfigButton?.addEventListener("click", openConfigModal);
 els.configModalClose?.addEventListener("click", closeConfigModal);
 els.configModalBackdrop?.addEventListener("click", closeConfigModal);
@@ -5335,11 +5776,9 @@ els.configModal?.addEventListener("click", (event) => {
 });
 els.llmConfigForm?.addEventListener("submit", saveLLMConfigFromForm);
 els.llmConfigClear?.addEventListener("click", clearSavedLLMConfig);
-els.pickLogFiles?.addEventListener("click", () => els.replayFile.click());
 els.pickLogFolder?.addEventListener("click", () => {
     sessionLibrary.appendFolderUpload = false;
     sessionLibrary.initialSessionId = null;
-    els.replayFolder.click();
 });
 
 // Populate the replay drop-note with the OS-appropriate sessions path.
@@ -5796,6 +6235,7 @@ els.sessionSearchClear?.addEventListener("click", () => {
 });
 
 renderSessionLibrary();
+runProjectAnalyticsChecks();
 void loadIndexedLogs();
 
 loadState();
