@@ -5614,7 +5614,10 @@ function setupResizers() {
             }
             if (toggleButton) {
                 toggleButton.classList.add("is-active");
-                toggleButton.setAttribute("title", "Show Sidebar");
+                toggleButton.setAttribute(
+                    "data-tooltip",
+                    "Show Sidebar (Ctrl+B)",
+                );
             }
             if (arrow) {
                 arrow.setAttribute("d", "M13 9l-3 3 3 3");
@@ -5627,7 +5630,10 @@ function setupResizers() {
             }
             if (toggleButton) {
                 toggleButton.classList.remove("is-active");
-                toggleButton.setAttribute("title", "Hide Sidebar");
+                toggleButton.setAttribute(
+                    "data-tooltip",
+                    "Hide Sidebar (Ctrl+B)",
+                );
             }
             if (arrow) {
                 arrow.setAttribute("d", "M10 9l3 3-3 3");
@@ -5652,6 +5658,16 @@ function setupResizers() {
             setSidebarCollapsed(!isCollapsed);
         });
     }
+
+    // Keyboard shortcut: Ctrl+B / Cmd+B to toggle sidebar
+    document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+            e.preventDefault();
+            const isCollapsed =
+                workspace.classList.contains("sidebar-collapsed");
+            setSidebarCollapsed(!isCollapsed);
+        }
+    });
 
     // Load initial sidebar collapsed state
     const savedSidebarCollapsed =

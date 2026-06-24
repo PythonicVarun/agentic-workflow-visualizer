@@ -160,7 +160,6 @@
             /* Session Summary Styles */
             .session-summary-container {
                 padding: 24px;
-                max-width: 1200px;
                 margin: 0 auto;
                 display: flex;
                 flex-direction: column;
@@ -223,6 +222,7 @@
             }
 
             .summary-table-card {
+                height: fit-content;
                 background: var(--surface);
                 border: 1px solid var(--line);
                 border-radius: 12px;
@@ -337,7 +337,7 @@
         <div class="app-shell">
             <header class="topbar">
                 <div class="brand">
-                    <span class="eyebrow">Live Codex activity</span>
+                    <span class="eyebrow">Agent Telemetry</span>
                     <h1>Agentic Workflow Visualizer</h1>
                 </div>
                 <div class="topbar-actions">
@@ -406,7 +406,7 @@
                             id="sidebar-toggle-button"
                             class="sidebar-toggle"
                             type="button"
-                            title="Toggle Sidebar"
+                            data-tooltip="Hide Sidebar (Ctrl+B)"
                         >
                             <svg
                                 id="sidebar-toggle-icon"
